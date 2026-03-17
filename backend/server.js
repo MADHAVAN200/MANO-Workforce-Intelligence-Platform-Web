@@ -27,6 +27,7 @@ import EventsAPI from './DAR/EventsAPI.js';
 import ActivitiesAPI from './DAR/ActivitiesAPI.js';
 import RequestsAPI from './DAR/RequestsAPI.js';
 import SettingsAPI from './DAR/SettingsAPI.js';
+import DARReportAPI from './DAR/DARReportAPI.js';
 import ProfileRoutes from './Profile/ProfileRoutes.js';
 import RecruitRoutes from './Recruiting/Recruit.js';
 import NotificationRoutes from './Notification/NotificationRoutes.js';
@@ -34,6 +35,7 @@ import NotificationService from './services/NotificationService.js';
 import ActivityLogService from './services/ActivityLogService.js';
 import { initAttendanceProcessor } from './cron/AttendanceProcessor.js';
 import { initCleanupScheduler } from './cron/cleanupScheduler.js';
+import { initDARReportScheduler } from './cron/DARReportScheduler.js';
 
 const app = express();
 const PORT = process.env.PORT || 5002;
@@ -97,6 +99,7 @@ app.use('/dar/events', EventsAPI);
 app.use('/dar/activities', ActivitiesAPI);
 app.use('/dar/requests', RequestsAPI);
 app.use('/dar/settings', SettingsAPI);
+app.use('/dar/reports', DARReportAPI);
 app.use('/profile', ProfileRoutes);
 app.use('/recruiting', RecruitRoutes);
 
@@ -135,6 +138,7 @@ server.listen(PORT, '0.0.0.0', () => {
   // Initialize Cron Jobs
   initAttendanceProcessor();
   initCleanupScheduler();
+  initDARReportScheduler();
   // initSubscriptionManager();
 });
 

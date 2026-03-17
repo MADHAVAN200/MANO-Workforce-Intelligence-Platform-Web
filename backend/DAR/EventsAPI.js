@@ -63,6 +63,41 @@ router.get('/list', authenticateJWT, catchAsync(async (req, res) => {
     res.json({ ok: true, data: events });
 }));
 
+// GET /dar/events/admin/all
+// Admin: list all events across all users in the organization
+router.get('/admin/all', authenticateJWT, catchAsync(async (req, res) => {
+    const { org_id, user_type } = req.user;
+    if (user_type !== 'admin' && user_type !== 'hr') {
+        return res.status(403).json({ ok: false, message: 'Access denied. Admins only.' });
+    }
+
+    const { date_from, date_to, type } = req.query;
+
+    let query = attendanceDB("events_meetings")
+        .select(
+            "*",
+            attendanceDB.raw("DATE_FORMAT(event_date, '%Y-%m-%d') as event_date"),
+            attendanceDB.raw("TIME_FORMAT(start_time, '%H:%i:%s') as start_time"),
+            attendanceDB.raw("TIME_FORMAT(end_time, '%H:%i:%s') as end_time")
+        )
+        .where("org_id", org_id);
+
+    if (date_from) {
+        query.whereRaw('DATE(event_date) >= ?', [date_from]);
+    }
+    if (date_to) {
+        query.whereRaw('DATE(event_date) <= ?', [date_to]);
+    }
+    if (type) {
+        query.where("type", type);
+    }
+
+    query.orderBy("event_date", "asc").orderBy("start_time", "asc");
+
+    const events = await query;
+    res.json({ ok: true, data: events });
+}));
+
 // PUT /dar/events/update/:id
 router.put('/update/:event_id', authenticateJWT, catchAsync(async (req, res) => {
     const { event_id } = req.params;

@@ -1,16 +1,17 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-    Activity, Settings, Database, FileText
+    Activity, Settings, Database, FileText, PlayCircle
 } from 'lucide-react';
 import api from '../../services/api';
 import DashboardInsights from '../../components/dar/admin/DashboardInsights';
 import RequestManager from '../../components/dar/admin/RequestManager';
 import MasterDataView from '../../components/dar/admin/MasterDataView';
 import AdminConfigurations from '../../components/dar/admin/AdminConfigurations';
+import SimulationPanel from '../../components/dar/admin/SimulationPanel';
 
 const DARAdmin = ({ embedded = false }) => {
-    const [activeTab, setActiveTab] = useState('insights'); // 'insights' | 'settings' | 'data' | 'requests'
+    const [activeTab, setActiveTab] = useState('insights'); // 'insights' | 'requests' | 'data' | 'settings' | 'simulate'
 
     // --- SHARED DATA STATE ---
     const [departments, setDepartments] = useState([]);
@@ -120,6 +121,16 @@ const DARAdmin = ({ embedded = false }) => {
                     <Settings size={16} />
                     Configurations
                 </button>
+                <button
+                    onClick={() => setActiveTab('simulate')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'simulate'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none'
+                        : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'
+                        }`}
+                >
+                    <PlayCircle size={16} />
+                    Simulator
+                </button>
             </div>
 
             {/* Content Area */}
@@ -151,6 +162,11 @@ const DARAdmin = ({ embedded = false }) => {
                         allUsers={allUsers}
                     />
                 )}
+
+                {activeTab === 'simulate' && (
+                    <SimulationPanel allUsers={allUsers} />
+                )}
+
             </div>
         </div>
     );

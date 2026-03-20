@@ -94,12 +94,12 @@ const BulkUpload = () => {
     const handleUpload = async () => {
         setIsUploading(true);
         try {
-            // 1. Check current subscription limit and existing users
-            const SUBSCRIPTION_LIMIT = 10;
+            // 1. Check existing users to calculate available slots based on subscription limit
             const usersData = await adminService.getAllUsers();
             const currentUsers = usersData.users || [];
             const currentCount = currentUsers.length;
-            const availableSlots = Math.max(0, SUBSCRIPTION_LIMIT - currentCount);
+            const maxUsersLimit = currentUser?.org_max_users || Infinity; // Fallback to Infinity if not yet in state
+            const availableSlots = Math.max(0, maxUsersLimit - currentCount);
 
             // Create a Set of existing emails for quick lookup
             const existingEmails = new Set(currentUsers.map(u => u.email.toLowerCase()));

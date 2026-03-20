@@ -21,6 +21,7 @@ router.post('/user/:user_id/restore', adminController.restoreUser);
 router.put('/user/:user_id/status', adminController.toggleUserStatus);
 router.post('/users/bulk', upload.single('file'), adminController.bulkCreateUsers);
 router.post('/users/bulk-validate', adminController.bulkValidateUsers);
+router.post('/users/bulk-json', adminController.bulkCreateUsersFromJson);
 
 // Lookups
 router.get('/dashboard-stats', adminController.getDashboardStats);

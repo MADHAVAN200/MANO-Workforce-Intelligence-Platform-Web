@@ -675,6 +675,12 @@ export const bulkCreateUsersFromJson = async (users, authInfo) => {
         const org = await trx("organizations").where({ org_id: orgId }).forUpdate().first();
         if (!org) throw new AppError("Organization not found", 404);
 
+        const currentUsersResult = await trx("users")
+            .where({ org_id: orgId, is_deleted: false })
+            .count('user_id as count')
+            .first();
+        let currentCount = parseInt(currentUsersResult.count || 0, 10);
+
         let nextUserNumber = org.last_user_number;
         let rowNumber = 0;
 
@@ -708,6 +714,12 @@ export const bulkCreateUsersFromJson = async (users, authInfo) => {
                     continue;
                 }
 
+                if (currentCount >= org.max_users) {
+                    results.failure_count++;
+                    results.errors.push(`Row ${rowNumber}: Organization user limit reached (${org.max_users})`);
+                    continue;
+                }
+
                 const hashedPassword = await bcrypt.hash(password, 10);
                 const deptId = deptName ? deptMap[deptName.toLowerCase()] : null;
                 const desgId = desgName ? desgMap[desgName.toLowerCase()] : null;
@@ -729,6 +741,7 @@ export const bulkCreateUsersFromJson = async (users, authInfo) => {
                     shift_id: shiftId
                 });
 
+                currentCount++;
                 results.success_count++;
             } catch (err) {
                 results.failure_count++;

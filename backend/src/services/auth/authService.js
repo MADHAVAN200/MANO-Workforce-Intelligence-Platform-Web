@@ -19,7 +19,7 @@ export const authenticateUser = async (userInput, password, reqInfo) => {
             'users.user_id', 'users.user_code', 'users.user_name', 'users.user_password', 'users.email', 'users.phone_no', 'users.org_id', 'users.user_type',
             'users.profile_image_url', 'users.is_active', 'users.is_deleted',
             'departments.dept_name', 'designations.desg_name', 'shifts.shift_name', 'shifts.shift_id',
-            'organizations.status as org_status'
+            'organizations.status as org_status', 'organizations.max_users as org_max_users'
         )
         .where('users.email', userInput)
         .orWhere('users.phone_no', userInput)
@@ -81,7 +81,8 @@ export const authenticateUser = async (userInput, password, reqInfo) => {
             designation: user.desg_name,
             department: user.dept_name,
             org_id: user.org_id,
-            profile_image_url: user.profile_image_url
+            profile_image_url: user.profile_image_url,
+            org_max_users: user.org_max_users
         }
     };
 };
@@ -202,8 +203,12 @@ export const getCurrentUser = async (userId, userType) => {
     }
 
     const user = await attendanceDB('users')
-        .where('user_id', userId)
-        .select('user_code', 'user_name', 'email', 'user_type', 'org_id', 'profile_image_url')
+        .leftJoin('organizations', 'users.org_id', 'organizations.org_id')
+        .where('users.user_id', userId)
+        .select(
+            'users.user_code', 'users.user_name', 'users.email', 'users.user_type', 'users.org_id', 'users.profile_image_url',
+            'organizations.max_users as org_max_users'
+        )
         .first();
 
     if (!user) throw new AppError("User not found", 404);

@@ -24,7 +24,7 @@ export const getNotifications = async (
             user_id,
             is_read: 0
         })
-        .count('notification_id as count')
+        .count('* as count')
         .first();
 
     return {

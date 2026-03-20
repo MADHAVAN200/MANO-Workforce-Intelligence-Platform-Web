@@ -242,6 +242,25 @@ export const bulkValidateUsers = catchAsync(async (req, res, next) => {
     res.json({ success: true, validation: validationReport });
 });
 
+export const bulkCreateUsersFromJson = catchAsync(async (req, res, next) => {
+    if (req.user.user_type !== "admin" && req.user.user_type !== "hr") {
+        throw new AppError("Only admin and HR can perform bulk operations", 403);
+    }
+    const { users } = req.body;
+    if (!users || !Array.isArray(users)) {
+        throw new AppError("Invalid JSON payload", 400);
+    }
+    
+    const authInfo = {
+        initiatorRole: req.user.user_type,
+        initiatorId: req.user.user_id,
+        orgId: req.user.org_id,
+    };
+
+    const results = await userService.bulkCreateUsersFromJson(users, authInfo);
+    res.json({ ok: true, report: results });
+});
+
 export const getDashboardStats = catchAsync(async (req, res) => {
     const org_id = req.user.org_id;
     const { range = 'weekly', year, month } = req.query;

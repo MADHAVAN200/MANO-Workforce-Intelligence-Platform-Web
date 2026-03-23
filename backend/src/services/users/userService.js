@@ -83,10 +83,12 @@ export const createUser = async (userData, authInfo, profileImageBuffer = null) 
 
     if (user_type === 'admin') throw new AppError("Cannot create Admin users via the panel", 403);
     if (authInfo.initiatorRole === 'hr' && user_type !== 'employee') throw new AppError("HR can only create Employees", 403);
-    if (!user_name || !user_password || !email) throw new AppError("Missing required fields (Name, Password, Email)", 400);
+    if (!user_name || !user_password || (!email && !phone_no)) throw new AppError("Missing required fields (Name, Password, Email or Phone)", 400);
 
-    const existingEmail = await attendanceDB("users").where({ email }).first();
-    if (existingEmail) throw new AppError("Email is already taken", 400);
+    if (email) {
+        const existingEmail = await attendanceDB("users").where({ email }).first();
+        if (existingEmail) throw new AppError("Email is already taken", 400);
+    }
 
     const phoneToSave = phone_no?.trim() || null;
     if (phoneToSave) {
@@ -465,12 +467,18 @@ export const bulkCreateUsers = async (file, authInfo) => {
             if (authInfo.initiatorRole === 'hr' && type.toLowerCase() !== 'employee') {
                 results.failure_count++; results.errors.push(`Row ${rowNumber}: HR can only create Employees`); continue;
             }
-            if (!name || !email) {
-                results.failure_count++; results.errors.push(`Row ${rowNumber}: Missing Name or Email`); continue;
+            if (!name || (!email && !phone)) {
+                results.failure_count++; results.errors.push(`Row ${rowNumber}: Missing Name, Email or Phone`); continue;
             }
 
-            const existing = await trx("users").where({ email }).orWhere({ phone_no: phone }).first();
-            if (existing) {
+            const existing = await trx("users")
+                .where(function () {
+                    if (email) this.orWhere({ email });
+                    if (phone) this.orWhere({ phone_no: phone });
+                })
+                .first();
+
+            if (existing && (email || phone)) {
                 results.failure_count++; results.errors.push(`Row ${rowNumber}: Duplicate Email/Phone`); continue;
             }
 
@@ -697,20 +705,26 @@ export const bulkCreateUsersFromJson = async (users, authInfo) => {
             const shiftName = row["Shift"] || row["shift"];
             const password = row["Password"] || row["password"] || `${name}-${orgId}`;
 
-            if (!name || !email) {
+            if (!name || (!email && !phone)) {
                 results.failure_count++;
-                results.errors.push(`Row ${rowNumber}: Missing Name or Email`);
+                results.errors.push(`Row ${rowNumber}: Missing Name, Email or Phone`);
                 continue;
             }
 
             try {
-                let duplicateQuery = trx("users").where({ email });
-                if (phone) duplicateQuery = duplicateQuery.orWhere({ phone_no: phone });
-                const existing = await duplicateQuery.first();
+                let existing = null;
+                if (email || phone) {
+                    existing = await trx("users")
+                        .where(function () {
+                            if (email) this.orWhere({ email });
+                            if (phone) this.orWhere({ phone_no: phone });
+                        })
+                        .first();
+                }
 
                 if (existing) {
                     results.failure_count++;
-                    results.errors.push(`Row ${rowNumber}: Duplicate Email/Phone (${email})`);
+                    results.errors.push(`Row ${rowNumber}: Duplicate Email/Phone (${email || phone})`);
                     continue;
                 }
 

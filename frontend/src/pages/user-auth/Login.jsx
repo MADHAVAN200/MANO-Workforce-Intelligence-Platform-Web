@@ -1,9 +1,10 @@
-﻿import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "react-toastify";
 import { Mail, Lock, ArrowRight, Loader2, Eye, EyeOff } from "lucide-react";
 import ReCAPTCHA from "react-google-recaptcha";
+
 
 const Login = () => {
   const { login } = useAuth();
@@ -15,6 +16,13 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [captchaToken, setCaptchaToken] = useState(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -23,14 +31,14 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!captchaToken) {
+    if (!isMobile && !captchaToken) {
       toast.error("Please complete the CAPTCHA check.");
       return;
     }
 
     setLoading(true);
     try {
-      const response = await login(formData.identifier, formData.password, captchaToken);
+      const response = await login(formData.identifier, formData.password);
       toast.success("Logged in successfully!");
 
       // Redirect to dashboard (DashboardHandler in App.jsx will decide which view to show)
@@ -38,8 +46,6 @@ const Login = () => {
     } catch (err) {
       const errorMessage = err.response?.data?.message || err.response?.data?.error || err.message || "Invalid credentials";
       toast.error(errorMessage);
-      window.grecaptcha?.reset();
-      setCaptchaToken(null);
     } finally {
       setLoading(false);
     }
@@ -117,13 +123,15 @@ const Login = () => {
             </div>
 
             {/* Captcha */}
-            <div className="flex justify-center my-4">
-              <ReCAPTCHA
-                sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY || "YOUR_SITE_KEY_HERE"}
-                onChange={setCaptchaToken}
-                theme="light" // or check for dark mode
-              />
-            </div>
+            {!isMobile && (
+              <div className="flex justify-center my-4">
+                <ReCAPTCHA
+                  sitekey={import.meta.env.VITE_RECAPTCHA_SITE_KEY || "YOUR_SITE_KEY_HERE"}
+                  onChange={setCaptchaToken}
+                  theme="light" // or check for dark mode
+                />
+              </div>
+            )}
 
             <button
               type="submit"

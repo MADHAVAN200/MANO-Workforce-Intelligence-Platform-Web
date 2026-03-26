@@ -186,7 +186,8 @@ const EmployeeForm = () => {
             reader.onloadend = () => {
                 setFormData(prev => ({
                     ...prev,
-                    profile_image: reader.result
+                    profile_image: reader.result,
+                    profile_image_file: file
                 }));
             };
             reader.readAsDataURL(file);
@@ -199,8 +200,8 @@ const EmployeeForm = () => {
             setIsSaving(true);
 
             // Basic validation
-            if (!formData.user_name || !formData.email) {
-                toast.error("Name and Email are required");
+            if (!formData.user_name || (!formData.email && !formData.phone_no)) {
+                toast.error("Name and either Email or Phone are required");
                 return;
             }
 
@@ -236,10 +237,10 @@ const EmployeeForm = () => {
 
 
             if (isEditMode) {
-                await adminService.updateUser(id, payload);
+                await adminService.updateUser(id, payload, formData.profile_image_file || null);
                 toast.success("User updated successfully");
             } else {
-                await adminService.createUser(payload);
+                await adminService.createUser(payload, formData.profile_image_file || null);
                 toast.success("User created successfully");
             }
             navigate('/employees');
@@ -391,8 +392,8 @@ const EmployeeForm = () => {
                                     name="email"
                                     value={formData.email}
                                     onChange={handleChange}
+                                    placeholder="Required if phone is empty"
                                     className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-800 dark:text-white"
-                                    required
                                 />
                             </div>
 
@@ -403,6 +404,7 @@ const EmployeeForm = () => {
                                     name="phone_no"
                                     value={formData.phone_no}
                                     onChange={handleChange}
+                                    placeholder="Required if email is empty"
                                     className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-800 dark:text-white"
                                 />
                             </div>

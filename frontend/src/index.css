@@ -4,6 +4,14 @@
 @tailwind components;
 @tailwind utilities;
 
+html,
+body,
+#root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+}
+
 @layer utilities {
     .no-calendar-picker::-webkit-calendar-picker-indicator {
         display: none !important;
@@ -41,4 +49,19 @@
 .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
+}
+
+/* Recharts Dark Mode Overrides */
+.dark .recharts-default-tooltip {
+    background-color: #1e293b !important;
+    border-color: #334155 !important;
+}
+
+.dark .recharts-tooltip-item,
+.dark .recharts-default-tooltip .recharts-tooltip-label {
+    color: #f8fafc !important;
+}
+
+.dark .recharts-tooltip-cursor {
+    fill: #334155 !important;
 }

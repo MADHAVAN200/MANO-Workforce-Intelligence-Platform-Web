@@ -53,12 +53,13 @@ const BulkUpload = () => {
                 const processed = data.map(row => {
                     const name = row['Name'] || row['name'] || row['user_name'];
                     const email = row['Email'] || row['email'];
+                    const phone = row['Phone'] || row['phone'] || row['phone_no'];
                     const dept = row['Department'] || row['department'] || row['dept_name'];
                     const desg = row['Designation'] || row['designation'] || row['desg_name'] || row['Role'] || row['role'];
 
                     // Basic validation check for preview
-                    let status = (name && email) ? 'Valid' : 'Error';
-                    let errorMsg = !status === 'Valid' ? 'Missing Data' : '';
+                    let status = (name && (email || phone)) ? 'Valid' : 'Error';
+                    let errorMsg = status === 'Error' ? 'Missing (Name & Contact)' : '';
 
                     // Role Restrictions
                     const roleLower = desg ? desg.toString().toLowerCase() : '';
@@ -75,6 +76,7 @@ const BulkUpload = () => {
                         ...row,
                         name,
                         email,
+                        phone,
                         dept: dept || '-',
                         desg: desg || '-',
                         status,
@@ -94,15 +96,16 @@ const BulkUpload = () => {
     const handleUpload = async () => {
         setIsUploading(true);
         try {
-            // 1. Check current subscription limit and existing users
-            const SUBSCRIPTION_LIMIT = 10;
+            // 1. Check existing users to calculate available slots based on subscription limit
             const usersData = await adminService.getAllUsers();
             const currentUsers = usersData.users || [];
             const currentCount = currentUsers.length;
-            const availableSlots = Math.max(0, SUBSCRIPTION_LIMIT - currentCount);
+            const maxUsersLimit = currentUser?.org_max_users || Infinity; // Fallback to Infinity if not yet in state
+            const availableSlots = Math.max(0, maxUsersLimit - currentCount);
 
-            // Create a Set of existing emails for quick lookup
-            const existingEmails = new Set(currentUsers.map(u => u.email.toLowerCase()));
+            // Create Sets of existing identifiers for quick lookup
+            const existingEmails = new Set(currentUsers.filter(u => u.email).map(u => u.email.toLowerCase()));
+            const existingPhones = new Set(currentUsers.filter(u => u.phone_no).map(u => u.phone_no.toString()));
 
             const validRows = previewData.filter(r => r.status === 'Valid');
 
@@ -116,17 +119,35 @@ const BulkUpload = () => {
             const newCandidates = [];
             const duplicates = [];
             const newEmailsSeen = new Set();
+            const newPhonesSeen = new Set();
 
             validRows.forEach(row => {
-                const emailLower = row.email.toLowerCase();
-                if (existingEmails.has(emailLower)) {
-                    duplicates.push({ ...row, skipReason: 'User already exists' });
-                } else if (newEmailsSeen.has(emailLower)) {
-                    // Duplicate within the CSV itself
-                    duplicates.push({ ...row, skipReason: 'Duplicate in file' });
+                const emailLower = row.email?.toString().toLowerCase();
+                const phoneStr = row.phone?.toString();
+
+                let isDuplicate = false;
+                let skipReason = '';
+
+                if (emailLower && existingEmails.has(emailLower)) {
+                    isDuplicate = true;
+                    skipReason = 'User already exists (Email)';
+                } else if (phoneStr && existingPhones.has(phoneStr)) {
+                    isDuplicate = true;
+                    skipReason = 'User already exists (Phone)';
+                } else if (emailLower && newEmailsSeen.has(emailLower)) {
+                    isDuplicate = true;
+                    skipReason = 'Duplicate Email in file';
+                } else if (phoneStr && newPhonesSeen.has(phoneStr)) {
+                    isDuplicate = true;
+                    skipReason = 'Duplicate Phone in file';
+                }
+
+                if (isDuplicate) {
+                    duplicates.push({ ...row, skipReason });
                 } else {
                     newCandidates.push(row);
-                    newEmailsSeen.add(emailLower);
+                    if (emailLower) newEmailsSeen.add(emailLower);
+                    if (phoneStr) newPhonesSeen.add(phoneStr);
                 }
             });
 

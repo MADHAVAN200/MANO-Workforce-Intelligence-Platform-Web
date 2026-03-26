@@ -1,4 +1,3 @@
-
 import { createServer } from 'http';
 import { Server as SocketIO } from 'socket.io';
 import express from 'express';
@@ -37,10 +36,10 @@ import { initAttendanceProcessor } from './cron/AttendanceProcessor.js';
 import { initCleanupScheduler } from './cron/cleanupScheduler.js';
 import { initDARReportScheduler } from './cron/DARReportScheduler.js';
 
-const app = express();
-const PORT = process.env.PORT || 5002;
+const PORT = 5003; // Using a different port initially for backend 2.0 to avoid conflicts
 
-// Allowed origins
+const server = createServer(app);
+
 const allowedOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
@@ -123,7 +122,6 @@ const io = new SocketIO(server, {
   },
 });
 
-// Basic connection handler
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id, 'from', socket.handshake.address);
 

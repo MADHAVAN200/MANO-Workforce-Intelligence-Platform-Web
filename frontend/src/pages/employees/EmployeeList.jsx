@@ -25,6 +25,13 @@ import { useAuth } from '../../context/AuthContext';
 
 const EmployeeList = () => {
     const navigate = useNavigate();
+
+    useEffect(() => {
+        if (window.innerWidth < 1024) {
+            navigate('/mobile-view/employees');
+        }
+    }, [navigate]);
+
     const { avatarTimestamp } = useAuth();
     const [employees, setEmployees] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -361,24 +368,21 @@ const EmployeeList = () => {
                                 </button>
 
                                 <div className="flex items-center gap-1">
-                                    {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                                        // Simple logic to show first 5 pages or sliding window could be added
-                                        // For now, let's keep it simple: Show pages around current
-                                        let pageNum = i + 1;
-                                        if (totalPages > 5) {
-                                            if (currentPage > 3) pageNum = currentPage - 2 + i;
-                                            if (pageNum > totalPages) pageNum = pageNum - (pageNum - totalPages);
-                                            // Ensure we don't go out of bounds if at end (simplified logic)
-                                            // A better full pagination logic might be needed if pages > 100
-                                            // For tabination like 10 users, standard pages are fine.
+                                    {(() => {
+                                        const pages = [];
+                                        const maxButtons = 5;
+                                        let startPage = Math.max(1, currentPage - 2);
+                                        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+
+                                        if (endPage - startPage + 1 < maxButtons) {
+                                            startPage = Math.max(1, endPage - maxButtons + 1);
                                         }
 
-                                        // Simplified: Just show all pages if < 7, else simple range
-                                        // Let's stick to simple Prev/Next + Current/Total text if complex, 
-                                        // or just render page numbers if totalPages is small.
-                                        // Given user request "tabination", let's do: [1] [2] ... 
+                                        for (let i = startPage; i <= endPage; i++) {
+                                            pages.push(i);
+                                        }
 
-                                        return (
+                                        return pages.map(pageNum => (
                                             <button
                                                 key={pageNum}
                                                 onClick={() => setCurrentPage(pageNum)}
@@ -389,8 +393,8 @@ const EmployeeList = () => {
                                             >
                                                 {pageNum}
                                             </button>
-                                        );
-                                    })}
+                                        ));
+                                    })()}
                                 </div>
 
                                 <button

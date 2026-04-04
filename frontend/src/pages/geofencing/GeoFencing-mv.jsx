@@ -202,12 +202,12 @@ const GeoFencing = () => {
                         .filter(s => s.work_locations?.some(wl => wl.location_id === loc.location_id))
                         .map(s => s.id);
                     return (
-                        <div key={loc.location_id} className="bg-white dark:bg-dark-card rounded-xl p-4 shadow-sm border border-slate-100 dark:border-slate-800">
+                        <div key={loc.location_id} className="bg-white dark:bg-dark-card rounded-xl p-4 shadow-sm border border-slate-100 dark:border-github-dark-border">
                             <div className="flex justify-between items-start mb-3">
                                 <div className="flex-1 pr-4">
                                     <h3
                                         onClick={() => openAssignModal(loc)}
-                                        className="font-bold text-slate-800 dark:text-white text-sm mb-1 flex items-center gap-2 cursor-pointer hover:text-indigo-600 transition-colors"
+                                        className="font-bold text-slate-800 dark:text-github-dark-text text-sm mb-1 flex items-center gap-2 cursor-pointer hover:text-indigo-600 transition-colors"
                                     >
                                         {loc.location_name}
                                         <span className="bg-indigo-50 text-indigo-600 p-1 rounded-full text-[10px]">
@@ -220,7 +220,7 @@ const GeoFencing = () => {
                             </div>
 
                             {/* Action Bar */}
-                            <div className="flex justify-between items-center pt-3 border-t border-slate-50 dark:border-slate-800">
+                            <div className="flex justify-between items-center pt-3 border-t border-slate-50 dark:border-github-dark-border">
                                 <div className="flex items-center gap-1" onClick={() => openAssignModal(loc)}>
                                     <div className="flex -space-x-2 overflow-hidden">
                                         {assignedStaffIds.length > 0 ? (
@@ -261,14 +261,14 @@ const GeoFencing = () => {
             {/* Assign Staff Modal */}
             {isModalOpen && createPortal(
                 <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-md animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-slate-900 w-full max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[90vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-200">
+                    <div className="bg-white dark:bg-github-dark-subtle w-full max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[90vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-200">
                         {/* Header */}
-                        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                        <div className="p-4 border-b border-slate-100 dark:border-github-dark-border flex justify-between items-center">
                             <div>
-                                <h3 className="font-bold text-slate-900 dark:text-white">Assign Staff</h3>
+                                <h3 className="font-bold text-slate-900 dark:text-github-dark-text">Assign Staff</h3>
                                 <p className="text-xs text-slate-500">{selectedLocation?.location_name}</p>
                             </div>
-                            <button onClick={() => setIsModalOpen(false)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-500 hover:text-red-500">
+                            <button onClick={() => setIsModalOpen(false)} className="p-2 bg-slate-100 dark:bg-github-dark-subtle rounded-full text-slate-500 hover:text-red-500">
                                 <X size={20} />
                             </button>
                         </div>
@@ -282,7 +282,7 @@ const GeoFencing = () => {
                                     placeholder="Search employees..."
                                     value={staffSearchTerm}
                                     onChange={(e) => setStaffSearchTerm(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-github-dark-subtle border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
                                 />
                             </div>
                         </div>
@@ -309,7 +309,7 @@ const GeoFencing = () => {
                                                 {s.image ? <img src={s.image} alt="" className="w-full h-full object-cover" /> : s.name.charAt(0)}
                                             </div>
                                             <div className="flex-1">
-                                                <h4 className="text-sm font-bold text-slate-800 dark:text-white">{s.name}</h4>
+                                                <h4 className="text-sm font-bold text-slate-800 dark:text-github-dark-text">{s.name}</h4>
                                                 <p className="text-[10px] text-slate-500">{s.role}</p>
                                             </div>
                                             <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${isSelected
@@ -325,7 +325,7 @@ const GeoFencing = () => {
                         </div>
 
                         {/* Footer */}
-                        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-b-2xl">
+                        <div className="p-4 border-t border-slate-100 dark:border-github-dark-border bg-white dark:bg-github-dark-subtle rounded-b-2xl">
                             <button
                                 onClick={handleSaveAssignments}
                                 className="w-full py-3.5 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 dark:shadow-none active:scale-[0.98] transition-all flex items-center justify-center gap-2"
@@ -342,11 +342,11 @@ const GeoFencing = () => {
             {/* Create Location Modal */}
             {isCreateModalOpen && createPortal(
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-md p-4 animate-in fade-in duration-200" onClick={() => setIsCreateModalOpen(false)}>
-                    <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl flex flex-col shadow-2xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-                        <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/20 rounded-t-2xl">
+                    <div className="bg-white dark:bg-github-dark-subtle w-full max-w-md rounded-2xl flex flex-col shadow-2xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+                        <div className="p-5 border-b border-slate-100 dark:border-github-dark-border flex justify-between items-center bg-slate-50/50 dark:bg-github-dark-subtle/20 rounded-t-2xl">
                             <div>
-                                <h3 className="font-bold text-slate-800 dark:text-white">Create Location</h3>
-                                <p className="text-xs text-slate-500 dark:text-slate-400">Add a new geo-fencing zone</p>
+                                <h3 className="font-bold text-slate-800 dark:text-github-dark-text">Create Location</h3>
+                                <p className="text-xs text-slate-500 dark:text-github-dark-muted">Add a new geo-fencing zone</p>
                             </div>
                             <button onClick={() => setIsCreateModalOpen(false)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors rounded-full">
                                 <X size={20} />
@@ -355,19 +355,19 @@ const GeoFencing = () => {
 
                         <form onSubmit={handleCreateGeofence} className="p-5 space-y-4">
                             <div>
-                                <label className="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1.5">Location Name *</label>
+                                <label className="block text-xs font-bold uppercase text-slate-500 dark:text-github-dark-muted mb-1.5">Location Name *</label>
                                 <input
                                     type="text"
                                     required
                                     value={newGeo.location_name}
                                     onChange={(e) => setNewGeo({ ...newGeo, location_name: e.target.value })}
                                     placeholder="e.g. Main Office"
-                                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-white border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-github-dark-subtle text-slate-800 dark:text-github-dark-text border border-slate-200 dark:border-github-dark-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1.5 flex justify-between items-center">
+                                <label className="block text-xs font-bold uppercase text-slate-500 dark:text-github-dark-muted mb-1.5 flex justify-between items-center">
                                     <span>Coordinates *</span>
                                     <button 
                                         type="button" 
@@ -384,7 +384,7 @@ const GeoFencing = () => {
                                         value={newGeo.latitude}
                                         onChange={(e) => setNewGeo({ ...newGeo, latitude: e.target.value })}
                                         placeholder="Lat (e.g. 19.12)"
-                                        className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-white border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono"
+                                        className="w-full px-3 py-2.5 bg-slate-50 dark:bg-github-dark-subtle text-slate-800 dark:text-github-dark-text border border-slate-200 dark:border-github-dark-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono"
                                     />
                                     <input
                                         type="text"
@@ -392,25 +392,25 @@ const GeoFencing = () => {
                                         value={newGeo.longitude}
                                         onChange={(e) => setNewGeo({ ...newGeo, longitude: e.target.value })}
                                         placeholder="Lng (e.g. 72.84)"
-                                        className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-white border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono"
+                                        className="w-full px-3 py-2.5 bg-slate-50 dark:bg-github-dark-subtle text-slate-800 dark:text-github-dark-text border border-slate-200 dark:border-github-dark-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono"
                                     />
                                 </div>
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1.5">Address *</label>
+                                <label className="block text-xs font-bold uppercase text-slate-500 dark:text-github-dark-muted mb-1.5">Address *</label>
                                 <textarea
                                     required
                                     value={newGeo.address}
                                     onChange={(e) => setNewGeo({ ...newGeo, address: e.target.value })}
                                     placeholder="Full street address..."
                                     rows="2"
-                                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-white border border-slate-200 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none max-h-[80px]"
+                                    className="w-full px-3 py-2.5 bg-slate-50 dark:bg-github-dark-subtle text-slate-800 dark:text-github-dark-text border border-slate-200 dark:border-github-dark-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none max-h-[80px]"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1.5 flex justify-between">
+                                <label className="block text-xs font-bold uppercase text-slate-500 dark:text-github-dark-muted mb-1.5 flex justify-between">
                                     <span>Radius Slider</span>
                                     <span className="text-indigo-600 dark:text-indigo-400">{newGeo.radius}m</span>
                                 </label>

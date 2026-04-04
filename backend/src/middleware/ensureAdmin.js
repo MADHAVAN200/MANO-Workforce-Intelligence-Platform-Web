@@ -7,9 +7,9 @@ const ensureAdmin = catchAsync((req, res, next) => {
         throw new AppError("Authentication required", 401);
     }
 
-    // Check if user is admin
-    if (req.user.user_type !== 'admin') {
-        throw new AppError("Access denied. Admins only.", 403);
+    // Check if user is admin or HR
+    if (req.user.user_type !== 'admin' && req.user.user_type !== 'hr') {
+        throw new AppError("Access denied. Admins or HR only.", 403);
     }
 
     next();

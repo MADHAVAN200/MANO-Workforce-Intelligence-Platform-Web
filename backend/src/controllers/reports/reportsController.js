@@ -92,7 +92,7 @@ const generatePdf = (title, columns, rows) => {
 };
 
 export const previewReport = catchAsync(async (req, res) => {
-    if (req.user.user_type !== "admin" && req.user.user_type !== "HR") {
+    if (req.user.user_type !== "admin" && req.user.user_type !== "hr") {
         return res.status(403).json({ ok: false, message: "Access denied" });
     }
 

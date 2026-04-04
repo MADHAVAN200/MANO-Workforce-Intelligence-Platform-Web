@@ -67,8 +67,8 @@ export const deleteShift = catchAsync(async (req, res) => {
 export const getShiftUsers = catchAsync(async (req, res) => {
     const { org_id, user_type } = req.user;
 
-    if (user_type !== 'admin') {
-        return res.status(403).json({ ok: false, message: 'Access denied. Admins only.' });
+    if (user_type !== 'admin' && user_type !== 'hr') {
+        return res.status(403).json({ ok: false, message: 'Access denied. Admins or HR only.' });
     }
 
     const users = await ShiftService.getUsersWithShifts(org_id);
@@ -78,8 +78,8 @@ export const getShiftUsers = catchAsync(async (req, res) => {
 export const assignUserShift = catchAsync(async (req, res) => {
     const { org_id, user_type } = req.user;
 
-    if (user_type !== 'admin') {
-        return res.status(403).json({ ok: false, message: 'Access denied. Admins only.' });
+    if (user_type !== 'admin' && user_type !== 'hr') {
+        return res.status(403).json({ ok: false, message: 'Access denied. Admins or HR only.' });
     }
 
     const { user_id } = req.params;

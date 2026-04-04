@@ -39,8 +39,8 @@ export const submitFeedback = catchAsync(async (req, res) => {
  * GET /feedback - Admin only: List all feedback with attachments
  */
 export const getFeedbackList = catchAsync(async (req, res) => {
-    if (req.user.user_type !== 'admin') {
-        throw new AppError('Access denied. Admin only.', 403);
+    if (req.user.user_type !== 'admin' && req.user.user_type !== 'hr') {
+        throw new AppError('Access denied. Admin or HR only.', 403);
     }
 
     const { status, type, limit = 50 } = req.query;
@@ -62,8 +62,8 @@ export const getFeedbackList = catchAsync(async (req, res) => {
  * PATCH /feedback/:id/status - Admin only: Update feedback status
  */
 export const updateFeedbackStatus = catchAsync(async (req, res) => {
-    if (req.user.user_type !== 'admin') {
-        throw new AppError('Access denied. Admin only.', 403);
+    if (req.user.user_type !== 'admin' && req.user.user_type !== 'hr') {
+        throw new AppError('Access denied. Admin or HR only.', 403);
     }
 
     const { id } = req.params;

@@ -11,6 +11,7 @@ import darActivityRoutes from './darRoutes/activitiesRoutes.js';
 import darEventRoutes from './darRoutes/eventsRoutes.js';
 import darRequestRoutes from './darRoutes/requestsRoutes.js';
 import darSettingsRoutes from './darRoutes/settingsRoutes.js';
+import darReportRoutes from '../services/darServices/DARReportAPI.js';
 import shiftRoutes from './policies/shiftRoutes.js';
 import attendanceRoutes from './attendance/attendanceRoutes.js';
 import feedbackRoutes from './feedback/feedbackRoutes.js';
@@ -43,6 +44,7 @@ router.use('/dar/activities', darActivityRoutes); // For DAR activities
 router.use('/dar/events', darEventRoutes); // For DAR events
 router.use('/dar/requests', darRequestRoutes); // For DAR requests
 router.use('/dar/settings', darSettingsRoutes); // For DAR settings
+router.use('/dar/reports', darReportRoutes); // For DAR reporting & LLM analysis
 router.use('/feedback', feedbackRoutes); // For feedback/bug reports
 router.use('/payment', paymentRoutes); // For Razorpay payments
 router.use('/profile', profileRoutes); // For user profile management

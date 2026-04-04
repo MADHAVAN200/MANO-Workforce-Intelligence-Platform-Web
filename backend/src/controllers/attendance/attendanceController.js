@@ -115,9 +115,9 @@ export const simulateTimeIn = catchAsync(async (req, res) => {
     return res.status(404).json({ ok: false, message: "Not Found" });
   }
 
-  // Allow admin to simulate for others
+  // Allow admin and hr to simulate for others
   let target_user_id = req.user.user_id;
-  if (req.body.user_id && req.user.user_type === "admin") {
+  if (req.body.user_id && ["admin", "hr"].includes(req.user.user_type)) {
     target_user_id = req.body.user_id;
   }
 
@@ -170,7 +170,7 @@ export const simulateTimeOut = catchAsync(async (req, res) => {
   }
 
   let target_user_id = req.user.user_id;
-  if (req.body.user_id && req.user.user_type === "admin") {
+  if (req.body.user_id && ["admin", "hr"].includes(req.user.user_type)) {
     target_user_id = req.body.user_id;
   }
 
@@ -352,7 +352,7 @@ export const reviewCorrectionRequest = catchAsync(async (req, res) => {
   const reviewer_id = req.user.user_id;
   const role = req.user.user_type;
 
-  if (role !== "admin") {
+  if (role !== "admin" && role !== "hr") {
     return res.status(403).json({ error: "Access denied" });
   }
 

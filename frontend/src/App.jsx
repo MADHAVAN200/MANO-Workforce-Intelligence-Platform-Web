@@ -64,6 +64,11 @@ import MobileFeedback from "./pages/feedback/Feedback-mv";
 import DailyActivityMobile from "./pages/dar/DailyActivity-mv";
 import MobileBulkHolidayImport from "./pages/holidays/BulkHolidayImport-mv";
 import MobileBulkUpload from "./pages/employees/BulkUpload-mv";
+import SuperAdminDashboardMobile from "./pages/dashboard/SuperAdminDashboard-mv";
+import OrganizationListMobile from "./pages/organizations/OrganizationList-mv";
+import SecurityAlertsMobile from "./pages/super-admin/SecurityAlerts-mv";
+import UserFeedbackMobile from "./pages/super-admin/UserFeedback-mv";
+import SystemLogsMobile from "./pages/super-admin/SystemLogs-mv";
 
 
 import SuperAdminDashboard from "./pages/dashboard/SuperAdminDashboard";
@@ -157,7 +162,7 @@ const DashboardHandler = () => {
     return <ResponsiveRoute DesktopComponent={EmployeeDashboard} MobileComponent={MobileEmployeeDashboard} />;
   }
   if (user?.user_type === 'super_admin') {
-    return <SuperAdminDashboard />;
+    return <ResponsiveRoute DesktopComponent={SuperAdminDashboard} MobileComponent={SuperAdminDashboardMobile} />;
   }
   return <ResponsiveRoute DesktopComponent={AdminDashboard} MobileComponent={MobileAdminDashboard} />;
 };
@@ -290,10 +295,10 @@ function App() {
 
             {/* Super Admin Only Routes */}
             <Route element={<ProtectedRoute allowedRoles={['super_admin']} />}>
-              <Route path="/organizations" element={<OrganizationList />} />
-              <Route path="/super-admin/alerts" element={<SecurityAlerts />} />
-              <Route path="/super-admin/feedback" element={<UserFeedback />} />
-              <Route path="/super-admin/logs" element={<SystemLogs />} />
+              <Route path="/organizations" element={<ResponsiveRoute DesktopComponent={OrganizationList} MobileComponent={OrganizationListMobile} />} />
+              <Route path="/super-admin/alerts" element={<ResponsiveRoute DesktopComponent={SecurityAlerts} MobileComponent={SecurityAlertsMobile} />} />
+              <Route path="/super-admin/feedback" element={<ResponsiveRoute DesktopComponent={UserFeedback} MobileComponent={UserFeedbackMobile} />} />
+              <Route path="/super-admin/logs" element={<ResponsiveRoute DesktopComponent={SystemLogs} MobileComponent={SystemLogsMobile} />} />
             </Route>
           </Route>
 

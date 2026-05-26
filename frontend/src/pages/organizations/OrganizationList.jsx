@@ -1,15 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
-import { Building, Plus, Loader2, Save, X, Search, Calendar, Shield, Activity, Clock, Users, Trash2, AlertTriangle, RotateCcw, Pencil } from 'lucide-react';
+import { Building, Plus, Loader2, Save, X, Search, Calendar, Shield, Activity, Clock, Users, Trash2, AlertTriangle, RotateCcw, Pencil, Terminal, Database, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle } from 'lucide-react';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
 import api from '../../services/api';
 import { toast } from 'react-toastify';
 import LoadingScreen from '../../components/LoadingScreen';
+import MinimalSelect from '../../components/MinimalSelect';
 
 const OrganizationList = () => {
     const [organizations, setOrganizations] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedOrg, setSelectedOrg] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
+
+    // Logs & Analytics tab states
+    const [activeDetailTab, setActiveDetailTab] = useState('details'); // 'details' | 'logs'
+    const [analytics, setAnalytics] = useState(null);
+    const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+    const [logs, setLogs] = useState([]);
+    const [loadingLogs, setLoadingLogs] = useState(false);
+    const [logType, setLogType] = useState('activity'); // 'activity' | 'errors'
+    const [logModule, setLogModule] = useState('');
+    const [logPlatform, setLogPlatform] = useState('');
+    const [logSearch, setLogSearch] = useState('');
+    const [logPage, setLogPage] = useState(1);
+    const [logPagination, setLogPagination] = useState({ total: 0, pages: 1 });
+    const [expandedLogId, setExpandedLogId] = useState(null);
+    const searchDebounceRef = useRef(null);
 
     // Admins State for the selected org
     const [orgAdmins, setOrgAdmins] = useState([]);
@@ -41,11 +58,6 @@ const OrganizationList = () => {
             // Debug: log all statuses to verify what the backend returns
             console.log('[Orgs] statuses:', data.map(o => `${o.org_code}=${o.status}`));
             setOrganizations(data);
-            if (data.length > 0 && !selectedOrg && !isEditing) {
-                // Only auto-select an active/non-deleted org on first load
-                const firstActive = data.find(o => o.status !== 'pending_deletion');
-                if (firstActive) handleSelectOrg(firstActive);
-            }
         } catch (error) {
             toast.error('Failed to fetch organizations');
         } finally {
@@ -54,12 +66,18 @@ const OrganizationList = () => {
     };
 
     const handleSelectOrg = async (org) => {
+        if (selectedOrg?.org_id === org.org_id) {
+            setSelectedOrg(null);
+            setIsEditing(false);
+            return;
+        }
         setSelectedOrg(org);
         setFormData({
             ...org,
             subscription_expiry: org.subscription_expiry ? new Date(org.subscription_expiry).toISOString().split('T')[0] : ''
         });
         setIsEditing(false); // Mode: View existing
+        setActiveDetailTab('details'); // Reset tab to overview on org switch
         fetchOrgAdmins(org.org_id);
     };
 
@@ -75,6 +93,59 @@ const OrganizationList = () => {
             setLoadingAdmins(false);
         }
     };
+
+    const fetchOrgAnalytics = async (orgId) => {
+        setLoadingAnalytics(true);
+        try {
+            const res = await api.get(`/organizations/${orgId}/analytics`);
+            if (res.data.success) {
+                setAnalytics(res.data.data);
+            }
+        } catch (err) {
+            console.error("Failed to fetch analytics:", err);
+            toast.error("Failed to load organization analytics");
+        } finally {
+            setLoadingAnalytics(false);
+        }
+    };
+
+    const fetchOrgLogs = async (orgId, page = 1) => {
+        setLoadingLogs(true);
+        try {
+            const queryParams = new URLSearchParams({
+                type: logType,
+                page: page,
+                limit: 200
+            });
+            if (logModule) queryParams.append('module', logModule);
+            if (logPlatform) queryParams.append('platform', logPlatform);
+            if (logSearch) queryParams.append('search', logSearch);
+
+            const res = await api.get(`/organizations/${orgId}/logs?${queryParams.toString()}`);
+            if (res.data.success) {
+                setLogs(res.data.data);
+                setLogPagination(res.data.pagination);
+                setLogPage(page);
+            }
+        } catch (err) {
+            console.error("Failed to fetch logs:", err);
+        } finally {
+            setLoadingLogs(false);
+        }
+    };
+
+    // Watchers to trigger analytics and log fetch automatically
+    useEffect(() => {
+        if (selectedOrg && activeDetailTab === 'logs') {
+            fetchOrgAnalytics(selectedOrg.org_id);
+        }
+    }, [selectedOrg, activeDetailTab]);
+
+    useEffect(() => {
+        if (selectedOrg && activeDetailTab === 'logs') {
+            fetchOrgLogs(selectedOrg.org_id, 1);
+        }
+    }, [selectedOrg, activeDetailTab, logType, logModule, logPlatform, logSearch]);
 
     const handleEditAdmin = (admin) => {
         setEditingAdminId(admin.user_id);
@@ -208,12 +279,578 @@ const OrganizationList = () => {
     const pendingOrgs = organizations.filter(o =>  isPendingDeletion(o) && matchesSearch(o));
     const displayedOrgs = listTab === 'active' ? activeOrgs : pendingOrgs;
 
+    const renderHubDashboard = () => {
+        // Dynamic aggregations
+        const totalOrgs = organizations.length;
+        const activeOrgsCount = organizations.filter(o => o.status === 'active' && !isPendingDeletion(o)).length;
+        const suspendedOrgsCount = organizations.filter(o => o.status === 'suspended' && !isPendingDeletion(o)).length;
+        const pendingDeletionOrgsCount = organizations.filter(o => isPendingDeletion(o)).length;
+        
+        // Plans grouping
+        const plans = {};
+        organizations.forEach(o => {
+            const plan = o.subscription_plan || 'Trial';
+            plans[plan] = (plans[plan] || 0) + 1;
+        });
+        const planDistribution = Object.keys(plans).map(key => ({
+            name: key,
+            count: plans[key]
+        }));
+
+        // Status grouping
+        const statusDistribution = [
+            { name: 'Active', value: activeOrgsCount, color: '#10b981' },
+            { name: 'Suspended', value: suspendedOrgsCount, color: '#f59e0b' },
+            { name: 'Pending Deletion', value: pendingDeletionOrgsCount, color: '#ef4444' }
+        ].filter(item => item.value > 0);
+
+        return (
+            <div className="flex-1 overflow-y-auto no-scrollbar p-6 space-y-6 bg-slate-50/30 dark:bg-github-dark-subtle/5 flex flex-col">
+                {/* Welcome & Overview Header */}
+                <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 dark:from-indigo-600/80 dark:to-indigo-700/80 p-6 rounded-2xl text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
+                     <div>
+                         <h2 className="text-xl font-bold tracking-tight">Organization Hub Dashboard</h2>
+                         <p className="text-xs text-indigo-100 mt-1 max-w-xl">
+                             Overview of tenant configurations, active accounts, health states, and billing tiers. Select an organization from the panel to manage settings.
+                         </p>
+                     </div>
+                     <div className="shrink-0 flex items-center justify-center p-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20">
+                         <Building size={24} />
+                     </div>
+                </div>
+
+                {/* KPI Cards Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+                     {/* Total Organizations */}
+                     <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-center justify-between">
+                         <div>
+                             <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider block">Total Orgs</span>
+                             <h4 className="text-2xl font-black text-slate-900 dark:text-white mt-1 tracking-tight">{totalOrgs}</h4>
+                         </div>
+                         <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/30">
+                             <Building size={20} />
+                         </div>
+                     </div>
+
+                     {/* Active Orgs */}
+                     <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-center justify-between">
+                         <div>
+                             <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider block">Active Tenants</span>
+                             <h4 className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 tracking-tight">{activeOrgsCount}</h4>
+                         </div>
+                         <div className="p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800/30">
+                             <Shield size={20} />
+                         </div>
+                     </div>
+
+                     {/* Suspended Orgs */}
+                     <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-center justify-between">
+                         <div>
+                             <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider block">Suspended</span>
+                             <h4 className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1 tracking-tight">{suspendedOrgsCount}</h4>
+                         </div>
+                         <div className="p-3 bg-amber-50 dark:bg-amber-900/30 rounded-xl text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-800/30">
+                             <AlertCircle size={20} />
+                         </div>
+                     </div>
+
+                     {/* Pending Deletion */}
+                     <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-center justify-between">
+                         <div>
+                             <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider block">Pending Deletion</span>
+                             <h4 className="text-2xl font-black text-red-600 dark:text-red-400 mt-1 tracking-tight">{pendingDeletionOrgsCount}</h4>
+                         </div>
+                         <div className="p-3 bg-red-50 dark:bg-red-900/30 rounded-xl text-red-600 dark:text-red-400 border border-red-100 dark:border-red-800/30">
+                             <Trash2 size={20} />
+                         </div>
+                     </div>
+                </div>
+
+                {/* Charts Section */}
+                {totalOrgs > 0 ? (
+                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 shrink-0">
+                         {/* Subscription Plans Distribution */}
+                         <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-2xl p-5 flex flex-col h-[280px]">
+                             <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-github-dark-muted mb-4">Subscription Plan Distribution</h4>
+                             <div className="flex-1 min-h-0">
+                                 <ResponsiveContainer width="100%" height="100%">
+                                     <BarChart data={planDistribution}>
+                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" className="dark:opacity-10" />
+                                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
+                                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
+                                         <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                                         <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} name="Organizations" />
+                                     </BarChart>
+                                 </ResponsiveContainer>
+                             </div>
+                         </div>
+
+                         {/* Status Breakdown (Donut) */}
+                         <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-2xl p-5 flex flex-col h-[280px]">
+                             <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-github-dark-muted mb-4">Tenant Status Share</h4>
+                             <div className="flex-1 min-h-0 flex items-center justify-center relative">
+                                 <ResponsiveContainer width="100%" height="100%">
+                                     <RechartsPieChart>
+                                         <Pie
+                                             data={statusDistribution}
+                                             dataKey="value"
+                                             nameKey="name"
+                                             cx="50%"
+                                             cy="50%"
+                                             innerRadius={45}
+                                             outerRadius={70}
+                                             paddingAngle={3}
+                                         >
+                                             {statusDistribution.map((entry, idx) => (
+                                                 <Cell key={`cell-${idx}`} fill={entry.color} />
+                                             ))}
+                                         </Pie>
+                                         <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', fontSize: 11 }} />
+                                     </RechartsPieChart>
+                                 </ResponsiveContainer>
+                                 <div className="absolute flex flex-col items-center justify-center pointer-events-none">
+                                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active</span>
+                                     <span className="text-xl font-extrabold text-slate-800 dark:text-white">
+                                         {totalOrgs > 0 ? Math.round((activeOrgsCount / totalOrgs) * 100) : 0}%
+                                     </span>
+                                 </div>
+                             </div>
+                         </div>
+                     </div>
+                ) : (
+                     <div className="py-20 text-center text-slate-400 dark:text-github-dark-muted flex flex-col items-center justify-center gap-2 shrink-0">
+                         <Building size={32} className="opacity-55 text-indigo-500" />
+                         <span className="text-sm font-semibold">No organizations registered yet.</span>
+                     </div>
+                )}
+
+                {/* Quick Tips / Guide */}
+                <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-start gap-4 shrink-0">
+                     <div className="p-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                         <AlertCircle size={16} />
+                     </div>
+                     <div>
+                         <h5 className="text-xs font-bold text-slate-800 dark:text-github-dark-text uppercase tracking-wider">Quick Instructions</h5>
+                         <p className="text-xs text-slate-500 dark:text-github-dark-muted mt-1 leading-relaxed">
+                             Select any organization in the left sidebar to access its profile, configure subscription boundaries, edit supervisor details, recover deleted accounts, or view live audit trails. Click the <strong className="text-indigo-600 dark:text-indigo-400 font-black">"Add New"</strong> button in the top left to create a new tenant.
+                         </p>
+                     </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <DashboardLayout title="Organization Management" noPadding={true}>
             <div className="h-[calc(100vh-64px)] p-6 space-y-4 overflow-hidden flex flex-col min-h-0">
 
-                {/* Main Content: Split View */}
-                <div className="flex flex-1 gap-6 overflow-hidden">
+                {/* Page Level Tabs — only visible if an organization is selected and not in "create new" or "edit" mode */}
+                {selectedOrg && !isEditing && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border px-6 py-4 rounded-2xl shadow-sm shrink-0">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-indigo-100 dark:bg-indigo-900/40 p-2 rounded-xl text-indigo-600 dark:text-indigo-400">
+                                <Building size={20} />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-800 dark:text-github-dark-text text-sm flex items-center gap-2">
+                                    {selectedOrg.org_name}
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                        selectedOrg.status === 'active' 
+                                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' 
+                                            : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                    }`}>
+                                        {selectedOrg.status}
+                                    </span>
+                                </h3>
+                                <p className="text-[11px] text-slate-500 dark:text-github-dark-muted font-mono">Code: {selectedOrg.org_code}</p>
+                            </div>
+                        </div>
+                        <div className="flex p-1 bg-slate-100 dark:bg-github-dark-subtle rounded-xl border border-slate-200/50 dark:border-github-dark-border">
+                            <button
+                                type="button"
+                                onClick={() => setActiveDetailTab('details')}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${
+                                    activeDetailTab === 'details'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'
+                                }`}
+                            >
+                                <Building size={14} />
+                                <span>Organization Profile & Admins</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveDetailTab('logs')}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${
+                                    activeDetailTab === 'logs'
+                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                        : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'
+                                }`}
+                            >
+                                <Terminal size={14} />
+                                <span>Org Activity & API Logs</span>
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Main Content Pane */}
+                {(!isEditing && selectedOrg && activeDetailTab === 'logs') ? (
+                    /* Full-Page Activity & Logs Console */
+                    <div className="flex-1 bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border overflow-hidden flex flex-col min-h-0">
+                        <div className="flex-1 overflow-y-auto p-6 sm:p-8 no-scrollbar bg-slate-50/50 dark:bg-github-dark-subtle/5 space-y-6 flex flex-col">
+                            {/* KPI Cards */}
+                            {loadingAnalytics ? (
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-pulse">
+                                    {[1, 2, 3, 4].map(i => (
+                                        <div key={i} className="bg-white dark:bg-dark-card h-24 rounded-2xl border border-slate-200 dark:border-github-dark-border" />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-center justify-between">
+                                        <div>
+                                            <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider block">Total API Calls</span>
+                                            <h4 className="text-2xl font-black text-slate-900 dark:text-white mt-1 tracking-tight">{analytics?.total_api_calls || 0}</h4>
+                                        </div>
+                                        <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/30">
+                                            <Database size={20} />
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-center justify-between">
+                                        <div>
+                                            <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider block">Success Rate</span>
+                                            <h4 className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 tracking-tight">{analytics?.success_rate ?? 100}%</h4>
+                                        </div>
+                                        <div className="p-3 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800/30">
+                                            <Activity size={20} />
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-center justify-between">
+                                        <div>
+                                            <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider block">Avg Latency</span>
+                                            <h4 className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1 tracking-tight">{analytics?.avg_latency_ms || 0} ms</h4>
+                                        </div>
+                                        <div className="p-3 bg-amber-50 dark:bg-amber-900/30 rounded-xl text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-800/30">
+                                            <Clock size={20} />
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-center justify-between">
+                                        <div>
+                                            <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider block">Active Accounts</span>
+                                            <h4 className="text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1 tracking-tight">{analytics?.active_users || 0}</h4>
+                                        </div>
+                                        <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/30">
+                                            <Users size={20} />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Analytics Charts */}
+                            {!loadingAnalytics && analytics && analytics.module_distribution?.length > 0 && (
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-2xl p-5 lg:col-span-2 flex flex-col h-[320px]">
+                                        <h4 className="text-sm font-semibold text-slate-800 dark:text-github-dark-text mb-4 uppercase tracking-wider text-xxs font-black">API Requests by Module</h4>
+                                        <div className="flex-1 min-h-0">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={analytics.module_distribution}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" className="dark:opacity-10" />
+                                                    <XAxis dataKey="module" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
+                                                    <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
+                                                    <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                                                    <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} name="Requests" />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-2xl p-5 flex flex-col h-[320px]">
+                                        <h4 className="text-sm font-semibold text-slate-800 dark:text-github-dark-text mb-4 uppercase tracking-wider text-xxs font-black">Platform Traffic Share</h4>
+                                        <div className="flex-1 min-h-0 flex items-center justify-center relative">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <RechartsPieChart>
+                                                    <Pie
+                                                        data={analytics.platform_distribution || []}
+                                                        dataKey="count"
+                                                        nameKey="platform"
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={50}
+                                                        outerRadius={80}
+                                                        paddingAngle={3}
+                                                    >
+                                                        {(analytics.platform_distribution || []).map((entry, idx) => (
+                                                            <Cell key={`cell-${idx}`} fill={['#6366f1', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#ec4899'][idx % 7]} />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', fontSize: 11 }} />
+                                                </RechartsPieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Logs Console Container */}
+                            <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-2xl overflow-hidden flex flex-col shadow-sm">
+                                {/* Filter Bar */}
+                                <div className="p-5 border-b border-slate-200 dark:border-github-dark-border bg-slate-50/40 dark:bg-github-dark-subtle/10 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+                                    <div className="flex items-center gap-3">
+                                        <span className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg">
+                                            <Terminal size={18} />
+                                        </span>
+                                        <div>
+                                            <h4 className="font-bold text-slate-900 dark:text-github-dark-text text-sm uppercase tracking-wider flex items-center gap-2">
+                                                API Activity Console
+                                                {logPagination.total > 0 && (
+                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-github-dark-muted border border-slate-200 dark:border-github-dark-border normal-case tracking-normal">
+                                                        {logPagination.total.toLocaleString()} Logs
+                                                    </span>
+                                                )}
+                                            </h4>
+                                            <p className="text-xs text-slate-500 dark:text-github-dark-muted">Live transaction history and errors for developer debugging</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+                                        {/* Log Type selector */}
+                                        <div className="flex p-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-github-dark-border">
+                                            <button
+                                                type="button"
+                                                onClick={() => { setLogType('activity'); setLogModule(''); setLogPlatform(''); setLogPage(1); }}
+                                                className={`px-3 py-1 rounded-md text-[10px] uppercase font-black tracking-wider transition-all duration-200 ${
+                                                    logType === 'activity'
+                                                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                                        : 'text-slate-500 dark:text-github-dark-muted'
+                                                }`}
+                                            >
+                                                Activity
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => { setLogType('errors'); setLogModule(''); setLogPlatform(''); setLogPage(1); }}
+                                                className={`px-3 py-1 rounded-md text-[10px] uppercase font-black tracking-wider transition-all duration-200 ${
+                                                    logType === 'errors'
+                                                        ? 'bg-white dark:bg-slate-700 text-red-600 dark:text-red-400 shadow-sm'
+                                                        : 'text-slate-500 dark:text-github-dark-muted'
+                                                }`}
+                                            >
+                                                Errors
+                                            </button>
+                                        </div>
+
+                                        {/* Module Filter dropdown — only for activity */}
+                                        {logType === 'activity' && (
+                                            <MinimalSelect
+                                                options={[
+                                                    { label: 'All Modules', value: '' },
+                                                    { label: 'Attendance', value: 'Attendance' },
+                                                    { label: 'Live Attendance', value: 'Live Attendance' },
+                                                    { label: 'DAR', value: 'DAR (Daily Activity)' },
+                                                    { label: 'Leaves', value: 'Leaves' },
+                                                    { label: 'Holidays', value: 'Holidays' },
+                                                    { label: 'Employees', value: 'Employees' },
+                                                    { label: 'Authentication', value: 'Authentication' },
+                                                    { label: 'Profile', value: 'Profile' },
+                                                    { label: 'Chatbot', value: 'Chatbot' },
+                                                    { label: 'Work Locations', value: 'Work Locations' }
+                                                ]}
+                                                value={logModule}
+                                                onChange={(val) => { setLogModule(val); setLogPage(1); }}
+                                                placeholder="All Modules"
+                                                size="sm"
+                                                triggerClassName="bg-white dark:bg-slate-800 border-slate-200 dark:border-github-dark-border text-xs py-1.5 px-3 font-bold"
+                                            />
+                                        )}
+
+                                        {/* Platform Filter dropdown */}
+                                        <MinimalSelect
+                                            options={[
+                                                { label: 'All Platforms', value: '' },
+                                                { label: 'Web Browser', value: 'WEB' },
+                                                { label: 'Mobile App', value: 'MOBILE_APP' },
+                                                { label: 'API Client', value: 'API_CLIENT' }
+                                            ]}
+                                            value={logPlatform}
+                                            onChange={(val) => { setLogPlatform(val); setLogPage(1); }}
+                                            placeholder="All Platforms"
+                                            size="sm"
+                                            triggerClassName="bg-white dark:bg-slate-800 border-slate-200 dark:border-github-dark-border text-xs py-1.5 px-3 font-bold"
+                                        />
+
+                                        {/* Search Bar */}
+                                        <div className="relative flex-grow sm:flex-grow-0">
+                                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
+                                            <input
+                                                type="text"
+                                                placeholder="Search logs..."
+                                                value={logSearch}
+                                                onChange={(e) => {
+                                                    setLogSearch(e.target.value);
+                                                    setLogPage(1);
+                                                }}
+                                                className="w-full sm:w-48 pl-8 pr-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-github-dark-border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 dark:text-slate-300 font-medium"
+                                            />
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => fetchOrgLogs(selectedOrg.org_id, 1)}
+                                            className="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-github-dark-border rounded-lg hover:text-indigo-600 text-slate-500 active:scale-95 transition-all shadow-sm"
+                                            title="Reload logs"
+                                        >
+                                            <RefreshCw size={12} className={loadingLogs ? 'animate-spin' : ''} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Log List/Console */}
+                                <div className="flex-1 overflow-x-auto min-h-[300px] no-scrollbar">
+                                    {loadingLogs ? (
+                                        <div className="py-24 flex justify-center items-center"><Loader2 className="animate-spin text-slate-400" size={24} /></div>
+                                    ) : logs.length === 0 ? (
+                                        <div className="py-20 text-center text-slate-400 dark:text-github-dark-muted flex flex-col items-center justify-center gap-2">
+                                            <Database size={32} className="opacity-55 text-indigo-500" />
+                                            <span className="text-sm font-semibold">No transactions discovered.</span>
+                                        </div>
+                                    ) : (
+                                        <table className="w-full text-left text-xs whitespace-nowrap">
+                                            <thead className="bg-slate-50 dark:bg-github-dark-subtle/80 border-b border-slate-200 dark:border-github-dark-border text-slate-600 dark:text-github-dark-muted font-bold text-xxs uppercase tracking-wider sticky top-0 z-10">
+                                                {logType === 'activity' ? (
+                                                    <tr>
+                                                        <th className="px-6 py-3 font-semibold">Time</th>
+                                                        <th className="px-6 py-3 font-semibold">Module</th>
+                                                        <th className="px-6 py-3 font-semibold">Platform</th>
+                                                        <th className="px-6 py-3 font-semibold">Action Description</th>
+                                                        <th className="px-6 py-3 font-semibold">Initiator</th>
+                                                        <th className="px-6 py-3 font-semibold">IP Address</th>
+                                                    </tr>
+                                                ) : (
+                                                    <tr>
+                                                        <th className="px-6 py-3 font-semibold">Time</th>
+                                                        <th className="px-6 py-3 font-semibold">Platform</th>
+                                                        <th className="px-6 py-3 font-semibold">Method / Path</th>
+                                                        <th className="px-6 py-3 font-semibold">Error Message</th>
+                                                        <th className="px-6 py-3 font-semibold">User Context</th>
+                                                    </tr>
+                                                )}
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                                                {logs.map(log => {
+                                                    const logId = log.activity_id || log.error_id;
+                                                    const isExpanded = expandedLogId === logId;
+                                                    return (
+                                                        <React.Fragment key={logId}>
+                                                            <tr
+                                                                onClick={() => setExpandedLogId(isExpanded ? null : logId)}
+                                                                className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors cursor-pointer select-none ${
+                                                                    logType === 'errors' ? 'hover:bg-red-500/5 dark:hover:bg-red-500/5' : ''
+                                                                }`}
+                                                            >
+                                                                <td className="px-6 py-4 font-mono text-slate-400">
+                                                                    {new Date(log.occurred_at).toLocaleString()}
+                                                                </td>
+                                                                {logType === 'activity' ? (
+                                                                    <>
+                                                                        <td className="px-6 py-4">
+                                                                            <span className="px-2 py-0.5 rounded font-black text-[10px] uppercase border bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/40 dark:text-indigo-400 dark:border-indigo-800/30">
+                                                                                {log.module}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td className="px-6 py-4">
+                                                                            <span className={`px-2 py-0.5 rounded font-black text-[10px] uppercase border ${
+                                                                                log.platform === 'WEB'
+                                                                                    ? 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800/50 dark:text-slate-300 dark:border-slate-700'
+                                                                                    : 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800/30'
+                                                                            }`}>
+                                                                                {log.platform === 'MOBILE_APP' ? 'MOBILE_APP' : log.platform}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td className="px-6 py-4 max-w-[320px] whitespace-normal text-slate-700 dark:text-slate-300 font-semibold break-all leading-normal">
+                                                                            {log.description}
+                                                                        </td>
+                                                                        <td className="px-6 py-4 font-bold text-slate-900 dark:text-white">
+                                                                            {log.user_name || 'System Auto'}
+                                                                        </td>
+                                                                        <td className="px-6 py-4 font-mono text-slate-400 text-xs">
+                                                                            {log.request_ip || 'N/A'}
+                                                                        </td>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <td className="px-6 py-4">
+                                                                            <span className={`px-2 py-0.5 rounded font-black text-[10px] uppercase border ${
+                                                                                log.platform === 'WEB'
+                                                                                    ? 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-800/50 dark:text-slate-300 dark:border-slate-700'
+                                                                                    : 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800/30'
+                                                                            }`}>
+                                                                                {log.platform === 'MOBILE_APP' ? 'MOBILE_APP' : log.platform}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td className="px-6 py-4 font-mono">
+                                                                            <span className="px-2 py-0.5 rounded bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 font-bold mr-2 text-[10px]">
+                                                                                {log.request_method}
+                                                                            </span>
+                                                                            <span className="text-slate-600 dark:text-github-dark-muted">{log.request_path || 'Background Job'}</span>
+                                                                        </td>
+                                                                        <td className="px-6 py-4 max-w-[350px] whitespace-normal text-red-600 dark:text-red-400 font-bold break-all leading-normal">
+                                                                            {log.error_message}
+                                                                        </td>
+                                                                        <td className="px-6 py-4 text-slate-600 dark:text-github-dark-muted font-bold">
+                                                                            {log.user_name ? `${log.user_name}` : 'Anonymous'}
+                                                                        </td>
+                                                                    </>
+                                                                )}
+                                                            </tr>
+                                                            {isExpanded && (
+                                                                <tr>
+                                                                    <td colSpan="6" className="bg-slate-50 dark:bg-slate-900/60 p-5 border-t border-b border-slate-100 dark:border-slate-800">
+                                                                        <div className="space-y-3">
+                                                                            <div className="flex items-center justify-between">
+                                                                                <h5 className="text-[10px] uppercase tracking-wider font-bold text-slate-400 flex items-center gap-1.5">
+                                                                                    <Terminal size={12} /> Log Details Inspector
+                                                                                </h5>
+                                                                                {logType === 'errors' && log.stack_trace && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            navigator.clipboard.writeText(log.stack_trace);
+                                                                                            toast.success("Stack trace copied");
+                                                                                        }}
+                                                                                        className="px-3 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-bold transition-all text-[10px] uppercase tracking-wider active:scale-95 shadow-sm"
+                                                                                    >
+                                                                                        Copy Trace
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                            <pre className="p-4 bg-slate-900 text-slate-300 rounded-xl overflow-x-auto text-[11px] font-mono break-all whitespace-pre-wrap max-h-72 border border-slate-800 no-scrollbar shadow-inner">
+                                                                                {logType === 'activity' 
+                                                                                    ? JSON.stringify(log.metadata ? (typeof log.metadata === 'string' ? JSON.parse(log.metadata) : log.metadata) : log, null, 2)
+                                                                                    : log.stack_trace || JSON.stringify(log, null, 2)
+                                                                                }
+                                                                            </pre>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            )}
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    /* Main Content: Split View */
+                    <div className="flex flex-1 gap-6 overflow-hidden">
 
                     {/* Left Pane: Scrollable List */}
                     <div className="w-1/3 flex flex-col bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-200 dark:border-github-dark-border overflow-hidden shrink-0">
@@ -348,10 +985,7 @@ const OrganizationList = () => {
                     {/* Right Pane: Details / Edit Form */}
                     <div className="flex-1 bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-200 dark:border-github-dark-border overflow-hidden flex flex-col">
                         {(!selectedOrg && !isEditing) ? (
-                            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 dark:text-github-dark-muted">
-                                <Building size={48} className="mb-4 text-slate-300 dark:text-slate-600" />
-                                <p>Select an organization to view details or create a new one.</p>
-                            </div>
+                            renderHubDashboard()
                         ) : (
                             <form onSubmit={handleSave} className="flex flex-col h-full">
                                 {/* Details Header */}
@@ -609,10 +1243,10 @@ const OrganizationList = () => {
                                                             <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 dark:text-github-dark-muted">Total Accounts</span>
                                                             <div className="text-xl font-black text-slate-900 dark:text-github-dark-text mt-1">{selectedOrg.total_users || 0}</div>
                                                         </div>
-                                                        <div className="bg-white dark:bg-slate-800 border border-slate-100 dark:border-github-dark-border/50 p-4 rounded-xl text-center shadow-sm animate-pulse-subtle">
+                                                        <div className="bg-white dark:bg-slate-800 border border-slate-100 dark:border-github-dark-border/50 p-4 rounded-xl text-center shadow-sm">
                                                             <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 dark:text-github-dark-muted">Active Logins</span>
                                                             <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-1 flex items-center justify-center gap-1.5">
-                                                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                                                                 {selectedOrg.active_users || 0}
                                                             </div>
                                                         </div>
@@ -739,7 +1373,8 @@ const OrganizationList = () => {
                         )}
                     </div>
                 </div>
-            </div>
+            )}
+        </div>
 
             {/* Delete Confirmation Modal */}
             {deleteConfirmOrg && (

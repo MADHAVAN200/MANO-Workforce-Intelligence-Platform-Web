@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '../../components/DashboardLayout';
-import { Users, Building, AlertCircle, MessageSquare, Briefcase, FileText, ShieldAlert, Clock, ChevronRight } from 'lucide-react';
+import { Users, Building, AlertCircle, MessageSquare, Briefcase, FileText, ShieldAlert, Clock, ChevronRight, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from 'recharts';
 
 const SuperAdminDashboard = () => {
   const navigate = useNavigate();
@@ -11,6 +12,10 @@ const SuperAdminDashboard = () => {
     totalUsers: 0,
     pendingFeedback: 0,
     openAlerts: 0,
+    totalApiCalls: 0,
+    totalErrors: 0,
+    moduleDistribution: [],
+    orgStatusDistribution: []
   });
   const [recentFeedback, setRecentFeedback] = useState([]);
   const [recentAlerts, setRecentAlerts] = useState([]);
@@ -43,7 +48,6 @@ const SuperAdminDashboard = () => {
       setFeedbackLoading(true);
       const res = await api.get('/super-admin/monitor/feedback');
       const all = Array.isArray(res.data.data) ? res.data.data : [];
-      // Show only pending entries, most recent 5
       const pending = all.filter(f => !f.status || ['pending', 'open', ''].includes(f.status.toLowerCase())).slice(0, 5);
       setRecentFeedback(pending);
     } catch (err) {
@@ -58,7 +62,6 @@ const SuperAdminDashboard = () => {
       setAlertsLoading(true);
       const res = await api.get('/super-admin/monitor/alerts');
       const all = Array.isArray(res.data.data) ? res.data.data : [];
-      // Show only open alerts, most recent 5
       const open = all.filter(a => a.status && ['open', 'unseen'].includes(a.status.toLowerCase())).slice(0, 5);
       setRecentAlerts(open);
     } catch (err) {
@@ -68,9 +71,11 @@ const SuperAdminDashboard = () => {
     }
   };
 
+  const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
+
   return (
     <DashboardLayout title="Super Admin Dashboard">
-      <div className="space-y-6 sm:space-y-8">
+      <div className="space-y-6 sm:space-y-8 pb-10">
 
         {/* Welcome Section */}
         <div className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-github-dark-border bg-gradient-to-r from-amber-500/10 via-indigo-500/5 to-transparent dark:from-amber-500/5 dark:via-indigo-500/5 dark:to-transparent p-6 sm:p-8 shadow-sm">
@@ -81,41 +86,41 @@ const SuperAdminDashboard = () => {
             <h2 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-github-dark-text tracking-tight">
               Welcome back, <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-500 to-indigo-600 dark:from-amber-400 dark:to-indigo-400 font-extrabold">Super Admin</span>
             </h2>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-github-dark-muted max-w-2xl leading-relaxed">
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-github-dark-muted max-w-2xl leading-relaxed font-medium">
               Access system metrics, manage organizations, monitor audit logs, and configure global platform settings from this panel.
             </p>
           </div>
         </div>
 
-        {/* Stats Grid — all real data */}
+        {/* Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
           <StatCard
             title="Total Organizations"
             value={stats.totalOrgs}
             label="Registered"
-            icon={<Building className="text-blue-500" size={24} />}
+            icon={<Building className="text-indigo-500" size={24} />}
             loading={loading}
+            onClick={() => navigate('/organizations')}
           />
           <StatCard
             title="Total Users"
             value={stats.totalUsers}
-            label="Active"
+            label="Across All Tenants"
             icon={<Users className="text-emerald-500" size={24} />}
             loading={loading}
           />
           <StatCard
-            title="Pending Feedback"
-            value={stats.pendingFeedback}
-            label="Awaiting Review"
-            icon={<MessageSquare className="text-violet-500" size={24} />}
+            title="System Transactions"
+            value={stats.totalApiCalls}
+            label="Total Monitored API Calls"
+            icon={<Activity className="text-amber-500" size={24} />}
             loading={loading}
-            onClick={() => navigate('/super-admin/feedback')}
-            highlight={stats.pendingFeedback > 0}
+            onClick={() => navigate('/super-admin/logs')}
           />
           <StatCard
             title="Open Security Alerts"
             value={stats.openAlerts}
-            label="Unseen"
+            label="Unseen Alerts"
             icon={<ShieldAlert className="text-red-500" size={24} />}
             loading={loading}
             onClick={() => navigate('/super-admin/alerts')}
@@ -124,13 +129,69 @@ const SuperAdminDashboard = () => {
           />
         </div>
 
+        {/* System Load Analytics & Organization Breakdown Charts */}
+        {!loading && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* System Load by Module Bar Chart */}
+            <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-2xl p-5 lg:col-span-2 flex flex-col h-[320px] shadow-sm">
+              <h4 className="text-xs font-black text-slate-500 dark:text-github-dark-muted uppercase tracking-wider mb-4">Collective API Load by Module</h4>
+              <div className="flex-1 min-h-0">
+                {stats.moduleDistribution?.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={stats.moduleDistribution}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" className="dark:opacity-10" />
+                      <XAxis dataKey="module" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
+                      <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                      <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} name="API Requests" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-400 text-xs italic">No activity data logged yet</div>
+                )}
+              </div>
+            </div>
+
+            {/* Tenant Health Share Pie Chart */}
+            <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-2xl p-5 flex flex-col h-[320px] shadow-sm">
+              <h4 className="text-xs font-black text-slate-500 dark:text-github-dark-muted uppercase tracking-wider mb-4">Organization Health Status</h4>
+              <div className="flex-1 min-h-0 flex items-center justify-center relative">
+                {stats.orgStatusDistribution?.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={stats.orgStatusDistribution}
+                        dataKey="count"
+                        nameKey="status"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={3}
+                      >
+                        {stats.orgStatusDistribution.map((entry, idx) => (
+                          <Cell key={`cell-${idx}`} fill={COLORS[idx % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', fontSize: 11 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-400 text-xs italic">No tenant configuration data</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Quick Actions */}
         <div>
-          <h3 className="text-sm font-medium text-slate-500 dark:text-github-dark-muted uppercase tracking-wider mb-3">Quick Actions</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <QuickLinkCard onClick={() => navigate('/organizations')} icon={<Building size={20} />} title="Add Organization" desc="Onboard new client" />
-            <QuickLinkCard onClick={() => navigate('/reports')} icon={<FileText size={20} />} title="System Reports" desc="View usage analytics" />
-            <QuickLinkCard onClick={() => navigate('/settings')} icon={<Briefcase size={20} />} title="Global Settings" desc="Configure system defaults" />
+          <h3 className="text-xs font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider mb-3">Quick Management Links</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <QuickLinkCard onClick={() => navigate('/organizations')} icon={<Building size={20} />} title="Organizations" desc="Onboard & manage tenants" />
+            <QuickLinkCard onClick={() => navigate('/super-admin/logs')} icon={<FileText size={20} />} title="System Logs" desc="View transaction history" />
+            <QuickLinkCard onClick={() => navigate('/super-admin/alerts')} icon={<ShieldAlert size={20} />} title="Security Alerts" desc="Check system firewalls" />
+            <QuickLinkCard onClick={() => navigate('/super-admin/feedback')} icon={<MessageSquare size={20} />} title="User Feedback" desc="Review tickets & bugs" />
           </div>
         </div>
 
@@ -169,11 +230,11 @@ const SuperAdminDashboard = () => {
                         <TypeBadge type={item.type} />
                         <p className="text-sm font-medium text-slate-800 dark:text-github-dark-text truncate">{item.title}</p>
                       </div>
-                      <span className="shrink-0 text-xs text-slate-400 dark:text-github-dark-muted whitespace-nowrap">
+                      <span className="shrink-0 text-xs text-slate-400 dark:text-github-dark-muted whitespace-nowrap font-medium">
                         {timeAgo(item.created_at)}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 dark:text-github-dark-muted mt-0.5 ml-0 truncate">
+                    <p className="text-xs text-slate-500 dark:text-github-dark-muted mt-0.5 ml-0 truncate font-medium">
                       {item.user_name || 'Anonymous'}{item.org_name ? ` · ${item.org_name}` : ''}
                     </p>
                   </div>
@@ -214,11 +275,11 @@ const SuperAdminDashboard = () => {
                         <SeverityBadge severity={alert.severity} />
                         <p className="text-sm font-medium text-slate-800 dark:text-github-dark-text truncate">{alert.alert_type}</p>
                       </div>
-                      <span className="shrink-0 flex items-center gap-1 text-xs text-amber-500 dark:text-amber-400 font-semibold">
+                      <span className="shrink-0 flex items-center gap-1 text-xs text-amber-500 dark:text-amber-400 font-bold">
                         <Clock size={11} /> Open
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 dark:text-github-dark-muted mt-0.5 truncate">
+                    <p className="text-xs text-slate-500 dark:text-github-dark-muted mt-0.5 truncate font-medium">
                       {alert.user_name || 'System/Anonymous'}{alert.org_name ? ` · ${alert.org_name}` : ''}{alert.ip_address ? ` · ${alert.ip_address}` : ''}
                     </p>
                   </div>

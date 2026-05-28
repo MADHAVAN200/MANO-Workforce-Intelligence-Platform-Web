@@ -72,32 +72,83 @@ const Reports = () => {
     const handleGenerate = async () => {
         setIsGenerating(true);
         try {
-            const data = await adminService.downloadReport(selectedMonth, reportType, fileFormat, "", selectedDate);
-            const url = window.URL.createObjectURL(new Blob([data]));
-            const link = document.createElement('a');
-            link.href = url;
-            const filename = `Report_${reportType}_${selectedMonth}.${fileFormat}`;
-            link.setAttribute('download', filename);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-
-            const newReport = {
-                id: exportHistory.length + 1,
-                name: filename,
-                type: reportType.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-                date: new Date().toLocaleString(),
-                status: 'Ready',
-                size: (data.size / 1024).toFixed(1) + ' KB'
-            };
-            setExportHistory([newReport, ...exportHistory]);
-            toast.success("Report generated successfully");
+            const res = await adminService.queueReport(selectedMonth, reportType, fileFormat, "", selectedDate);
+            if (res.ok) {
+                const reportId = res.reportId;
+                const filename = `Report_${reportType}_${selectedMonth || selectedDate}.${fileFormat}`;
+                const newReport = {
+                    id: reportId || Date.now().toString(),
+                    reportId: reportId,
+                    name: filename,
+                    type: reportType.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+                    date: new Date().toLocaleString(),
+                    status: 'Generating',
+                    size: 'Pending'
+                };
+                setExportHistory(prev => [newReport, ...prev]);
+                toast.info("Report is compiling in the background! Track it in Export History.");
+                setActiveTab('history');
+            }
         } catch (error) {
             toast.error(error.message || "Failed to generate report");
         } finally {
             setIsGenerating(false);
         }
     };
+
+    // Poll status of generating reports in history
+    useEffect(() => {
+        const generatingReports = exportHistory.filter(item => item.status === 'Generating');
+        if (generatingReports.length === 0) return;
+
+        const interval = setInterval(async () => {
+            let updated = false;
+            const nextHistory = await Promise.all(exportHistory.map(async (item) => {
+                if (item.status === 'Generating' && item.reportId) {
+                    try {
+                        const res = await adminService.getReportStatus(item.reportId);
+                        if (res.ok && res.data) {
+                            const { status, file_url, error_message } = res.data;
+                            if (status === 'completed') {
+                                updated = true;
+                                toast.success(`Report Ready: ${item.type} has compiled successfully.`);
+                                // Trigger automatic download in background
+                                const link = document.createElement('a');
+                                link.href = file_url;
+                                link.setAttribute('download', item.name);
+                                document.body.appendChild(link);
+                                link.click();
+                                link.remove();
+                                return {
+                                    ...item,
+                                    status: 'Ready',
+                                    file_url,
+                                    size: 'S3 Link'
+                                };
+                            } else if (status === 'failed') {
+                                updated = true;
+                                toast.error(`Report Failed: ${error_message || 'Compilation failed'}`);
+                                return {
+                                    ...item,
+                                    status: 'Failed',
+                                    size: 'Error'
+                                };
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Failed to poll status for report", item.reportId, err);
+                    }
+                }
+                return item;
+            }));
+
+            if (updated) {
+                setExportHistory(nextHistory);
+            }
+        }, 3000);
+
+        return () => clearInterval(interval);
+    }, [exportHistory]);
 
     return (
         <DashboardLayout title="Reports & Exports">
@@ -324,8 +375,18 @@ const Reports = () => {
                                                     </td>
                                                     <td className="px-6 py-5">
                                                         {file.status === 'Ready' ? (
-                                                            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1 rounded-full shadow-sm">
-                                                                <CheckCircle size={14} /> Ready
+                                                            <a 
+                                                                href={file.file_url} 
+                                                                target="_blank" 
+                                                                rel="noopener noreferrer" 
+                                                                download={file.name}
+                                                                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1 rounded-full shadow-sm hover:bg-emerald-100 dark:hover:bg-emerald-800/30 transition-all cursor-pointer"
+                                                            >
+                                                                <CheckCircle size={14} /> Ready (Download)
+                                                            </a>
+                                                        ) : file.status === 'Generating' ? (
+                                                            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-1 rounded-full shadow-sm animate-pulse">
+                                                                <div className="w-3.5 h-3.5 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin"></div> Generating...
                                                             </span>
                                                         ) : (
                                                             <span className="inline-flex items-center gap-1.5 text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-1 rounded-full shadow-sm">

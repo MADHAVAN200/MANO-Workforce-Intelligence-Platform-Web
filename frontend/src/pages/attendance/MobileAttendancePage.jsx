@@ -318,20 +318,53 @@ const MobileAttendancePage = () => {
     const downloadReport = async () => {
         if (!reportMonth) return;
         setIsDownloading(true);
+        const toastId = toast.loading("Starting report compilation...");
         try {
-            const blob = await attendanceService.downloadMyReport(reportMonth, fileFormat);
-            const url = window.URL.createObjectURL(new Blob([blob]));
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `Attendance_Report_${reportMonth}.${fileFormat}`);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            toast.success("Report downloaded successfully");
+            const res = await attendanceService.downloadMyReport(reportMonth, fileFormat);
+            if (res.ok && res.reportId) {
+                toast.update(toastId, { render: "Compiling your report in the background...", type: "info", isLoading: true });
+                const reportId = res.reportId;
+                
+                // Poll status
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusRes = await attendanceService.getMyReportStatus(reportId);
+                        if (statusRes.ok && statusRes.data) {
+                            const { status, file_url, error_message } = statusRes.data;
+                            if (status === 'completed') {
+                                clearInterval(pollInterval);
+                                // Trigger download from S3 pre-signed URL
+                                const link = document.createElement('a');
+                                link.href = file_url;
+                                link.setAttribute('download', `Attendance_Report_${reportMonth}.${fileFormat}`);
+                                document.body.appendChild(link);
+                                link.click();
+                                link.remove();
+                                toast.update(toastId, { render: "Report compiled and downloaded successfully!", type: "success", isLoading: false, autoClose: 3000 });
+                                setIsDownloading(false);
+                            } else if (status === 'failed') {
+                                clearInterval(pollInterval);
+                                toast.update(toastId, { render: `Generation failed: ${error_message || 'Unknown error'}`, type: "error", isLoading: false, autoClose: 4000 });
+                                setIsDownloading(false);
+                            }
+                        }
+                    } catch (pollErr) {
+                        console.error("Error polling report status:", pollErr);
+                    }
+                }, 2000);
+
+                // Safe fallback to prevent infinite polling loop in case anything hangs
+                setTimeout(() => {
+                    clearInterval(pollInterval);
+                    setIsDownloading(false);
+                }, 60000); // 1 minute max timeout
+            } else {
+                toast.update(toastId, { render: "Failed to queue report.", type: "error", isLoading: false, autoClose: 3000 });
+                setIsDownloading(false);
+            }
         } catch (error) {
             console.error("Download failed", error);
-            toast.error("Failed to download report");
-        } finally {
+            toast.update(toastId, { render: error.message || "Failed to download your report", type: "error", isLoading: false, autoClose: 3000 });
             setIsDownloading(false);
         }
     };

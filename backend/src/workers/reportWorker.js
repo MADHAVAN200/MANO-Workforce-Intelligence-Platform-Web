@@ -104,4 +104,8 @@ reportWorker.on('failed', (job, err) => {
     console.error(`💥 [Worker] Job #${job.id} failed with error:`, err);
 });
 
+reportWorker.on('error', (err) => {
+    // Catch worker connection errors silently as redisConnection manages warnings
+});
+
 export default reportWorker;

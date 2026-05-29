@@ -3,6 +3,7 @@ import catchAsync from '../../utils/catchAsync.js';
 import AppError from '../../utils/AppError.js';
 import { handleMentions } from '../../services/collaboration/mentionService.js';
 import { encryptText, decryptText } from '../../utils/encryption.js';
+import { uploadFile } from '../../services/s3/s3Service.js';
 
 // GET sanitized coworkers inside same organization
 export const getOrgUsers = catchAsync(async (req, res, next) => {
@@ -311,6 +312,7 @@ export const getRoomMessages = catchAsync(async (req, res, next) => {
             room_id: Number(roomId),
             sender_id: Number(msg.sender_id),
             message_text: msg.message_text,
+            attachment: msg.attachment || null,
             created_at: msg.created_at,
             user_name: sender ? sender.user_name : 'Unknown Colleague',
             profile_image_url: sender ? sender.profile_image_url : null
@@ -328,10 +330,10 @@ export const sendMessage = catchAsync(async (req, res, next) => {
     const userId = req.user.user_id ?? req.user.id;
     const orgId = req.user.org_id;
     const { roomId } = req.params;
-    const { message_text } = req.body;
+    const { message_text, attachment } = req.body;
 
-    if (!message_text || message_text.trim() === '') {
-        throw new AppError('Message text cannot be empty', 400);
+    if ((!message_text || message_text.trim() === '') && !attachment) {
+        throw new AppError('Message body or attachment is required', 400);
     }
 
     const room = await attendanceDB('chat_rooms')
@@ -365,7 +367,8 @@ export const sendMessage = catchAsync(async (req, res, next) => {
     const newMsg = {
         message_id: messageId,
         sender_id: Number(userId),
-        message_text: message_text.trim(),
+        message_text: message_text ? message_text.trim() : '',
+        attachment: attachment || null,
         created_at: new Date().toISOString()
     };
 
@@ -386,7 +389,8 @@ export const sendMessage = catchAsync(async (req, res, next) => {
         message_id: messageId,
         room_id: Number(roomId),
         sender_id: Number(userId),
-        message_text: message_text.trim(),
+        message_text: newMsg.message_text,
+        attachment: newMsg.attachment,
         created_at: newMsg.created_at,
         user_name: sender ? sender.user_name : 'Unknown Colleague',
         profile_image_url: sender ? sender.profile_image_url : null
@@ -397,19 +401,79 @@ export const sendMessage = catchAsync(async (req, res, next) => {
         io.to(`room_${roomId}`).emit('message_received', formattedResponseMsg);
     }
 
-    await handleMentions({
-        org_id: room.org_id,
-        sender_id: userId,
-        text: message_text,
-        context_type: 'chat_message',
-        context_id: messageId,
-        room_id: roomId,
-        io
-    });
+    if (message_text) {
+        await handleMentions({
+            org_id: room.org_id,
+            sender_id: userId,
+            text: message_text,
+            context_type: 'chat_message',
+            context_id: messageId,
+            room_id: roomId,
+            io
+        });
+    }
 
     res.status(201).json({
         success: true,
         data: formattedResponseMsg
+    });
+});
+
+// POST upload attachment to S3 (max 50MB)
+export const uploadAttachment = catchAsync(async (req, res, next) => {
+    const userId = req.user.user_id ?? req.user.id;
+    const orgId = req.user.org_id || 1;
+    const { roomId } = req.params;
+
+    if (!req.file) {
+        throw new AppError('No file uploaded', 400);
+    }
+
+    const room = await attendanceDB('chat_rooms')
+        .where({ room_id: roomId })
+        .first();
+
+    if (!room) {
+        throw new AppError('Chat room not found', 404);
+    }
+
+    let memberIds = [];
+    try {
+        memberIds = typeof room.member_ids === 'string' ? JSON.parse(room.member_ids) : room.member_ids;
+    } catch (e) {
+        // Ignore
+    }
+
+    if (!Array.isArray(memberIds) || !memberIds.map(Number).includes(Number(userId))) {
+        throw new AppError('You are not a member of this chat room', 403);
+    }
+
+    const timestamp = Date.now();
+    const directory = `chat-attachments/org_${orgId}/room_${roomId}`;
+    const filename = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const key = `${timestamp}_${filename}`;
+
+    const uploadResult = await uploadFile({
+        fileBuffer: req.file.buffer,
+        key,
+        directory,
+        contentType: req.file.mimetype
+    });
+
+    if (!uploadResult.success) {
+        throw new AppError('Failed to upload file to storage', 500);
+    }
+
+    res.status(200).json({
+        success: true,
+        message: 'Attachment uploaded successfully',
+        file: {
+            url: uploadResult.url,
+            key: uploadResult.key,
+            name: req.file.originalname,
+            size: req.file.size,
+            type: req.file.mimetype
+        }
     });
 });
 

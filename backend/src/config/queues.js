@@ -14,7 +14,8 @@ const getRedisConnectionOptions = () => {
   // Auto-detect secure TLS connection
   const redisHost = process.env.REDIS_HOST || '';
   const redisUrl = process.env.REDIS_URL || '';
-  const isSecurePort = Number(process.env.REDIS_PORT) === 6380;
+  const redisPort = Number(process.env.REDIS_PORT) || 6379;
+  const isSecurePort = redisPort === 6380;
   
   const isTls = process.env.REDIS_USE_TLS === 'true' || 
                 redisUrl.startsWith('rediss://') ||
@@ -33,16 +34,44 @@ const getRedisConnectionOptions = () => {
 
 const createRedisConnection = () => {
   const options = getRedisConnectionOptions();
+  const redisHost = process.env.REDIS_HOST || '';
   const redisUrl = process.env.REDIS_URL || '';
+  const redisPort = Number(process.env.REDIS_PORT) || 6379;
+  const redisPassword = process.env.REDIS_PASSWORD || undefined;
+
+  // Detect if it is a Redis Cluster (AWS ElastiCache Clustered mode enabled)
+  const isCluster = redisHost.startsWith('clustercfg.') || 
+                    redisHost.includes('-cluster') ||
+                    process.env.REDIS_IS_CLUSTER === 'true';
+
+  if (isCluster) {
+    console.log(`🌀 [Queue] Initializing Redis Cluster connection for ${redisHost}...`);
+    return new Redis.Cluster(
+      [
+        {
+          host: redisHost,
+          port: redisPort,
+        }
+      ],
+      {
+        redisOptions: {
+          password: redisPassword,
+          ...options
+        },
+        dnsLookup: (address, callback) => callback(null, address),
+        slotsRefreshTimeout: 2000,
+      }
+    );
+  }
 
   if (redisUrl) {
     return new Redis(redisUrl, options);
   }
 
   return new Redis({
-    host: process.env.REDIS_HOST || '127.0.0.1',
-    port: Number(process.env.REDIS_PORT) || 6379,
-    password: process.env.REDIS_PASSWORD || undefined,
+    host: redisHost || '127.0.0.1',
+    port: redisPort,
+    password: redisPassword,
     ...options
   });
 };

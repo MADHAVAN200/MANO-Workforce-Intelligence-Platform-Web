@@ -290,5 +290,25 @@ export const attendanceService = {
             console.error("Failed to fetch shift policy", error);
             return { success: false, shift: null };
         }
+    },
+    // Get Daily Summary (User range)
+    async getDailySummary(dateFrom, dateTo) {
+        try {
+            const res = await api.get(`${API_BASE_URL}/daily-summary?date_from=${dateFrom}&date_to=${dateTo}`);
+            return res.data;
+        } catch (error) {
+            console.error("Failed to fetch daily summary", error);
+            throw new Error(error.response?.data?.message || "Failed to fetch daily summary");
+        }
+    },
+    // Get Daily Summary (Admin single date)
+    async getDailySummaryAdmin(date) {
+        try {
+            const res = await api.get(`${API_BASE_URL}/daily-summary/admin?date=${date}`);
+            return res.data;
+        } catch (error) {
+            console.error("Failed to fetch admin daily summary", error);
+            throw new Error(error.response?.data?.message || "Failed to fetch live daily summary");
+        }
     }
 };

@@ -71,6 +71,24 @@ router.get("/records",
 );
 
 /**
+ * GET /attendance/daily-summary/admin
+ * Admin endpoint to get dynamic daily summary for all staff on a date
+ */
+router.get("/daily-summary/admin",
+  authenticateJWT,
+  AttendanceController.getAdminDailySummary
+);
+
+/**
+ * GET /attendance/daily-summary
+ * User endpoint to get daily summary history for a date range
+ */
+router.get("/daily-summary",
+  authenticateJWT,
+  AttendanceController.getUserDailySummary
+);
+
+/**
  * GET /attendance/records/export
  * Export user's attendance records for a month as Excel
  */

@@ -52,7 +52,7 @@ export function buildPolicy(workingDays = [], weekOffRules = [], halfDayRules = 
     for (let d = 0; d < 7; d++) {
         const dayName = dayNames[d];
         const isWorking = workingDays.includes(dayName);
-        
+
         const woRule = weekOffRules.find(r => r.day === dayName);
         const hdRule = halfDayRules.find(r => r.day === dayName);
         const hdWeeks = hdRule ? hdRule.weeks : [];
@@ -68,7 +68,7 @@ export function buildPolicy(workingDays = [], weekOffRules = [], halfDayRules = 
         } else {
             // Non-working days default to OFF every week.
             let offWeeks = [1, 2, 3, 4, 5];
-            
+
             if (woRule && woRule.weeks.length > 0) {
                 // Explicitly provided Alternate Full Days Off
                 offWeeks = [...woRule.weeks];
@@ -80,7 +80,7 @@ export function buildPolicy(workingDays = [], weekOffRules = [], halfDayRules = 
             if (offWeeks.length > 0) {
                 policy.push({ day: dayName, type: 'full', frequency: offWeeks.length >= 5 ? 'every' : offWeeks });
             }
-            
+
             if (hdRule && hdWeeks.length > 0) {
                 const entry = { day: dayName, type: 'half', frequency: hdWeeks.length >= 5 ? 'every' : hdWeeks };
                 if (hdRule.timing && hdRule.timing.start_time) entry.timing = hdRule.timing;
@@ -100,7 +100,7 @@ export function buildPolicy(workingDays = [], weekOffRules = [], halfDayRules = 
 export function parsePolicy(policy) {
     const entries = normalisePolicyInput(policy);
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    
+
     const workingDaysIndices = new Set([0, 1, 2, 3, 4, 5, 6]);
     const weekOffMap = new Map();
     const halfDayMap = new Map();
@@ -138,25 +138,10 @@ export function parsePolicy(policy) {
         }
     }
 
-    // Cleanup auto-generated full-off weeks for half-day days
-    for (const [day, rule] of halfDayMap.entries()) {
-        const woRule = weekOffMap.get(day);
-        if (woRule) {
-            const hdWeeks = Array.from(rule.weeks);
-            const woWeeks = Array.from(woRule.weeks);
-            const totalWeeks = new Set([...hdWeeks, ...woWeeks]);
-            
-            // If they perfectly cover 1,2,3,4,5 and have no overlap
-            if (totalWeeks.size === 5 && hdWeeks.length + woWeeks.length === 5) {
-                // It was an auto-fallback. We can safely remove it from the UI state.
-                weekOffMap.delete(day);
-            }
-        }
-    }
 
     // Convert back to string arrays
     const workingDays = [...workingDaysIndices].sort().map(d => dayNames[d]);
-    
+
     const weekOffRules = mapToRules(weekOffMap);
     const halfDayRules = mapToRules(halfDayMap);
 

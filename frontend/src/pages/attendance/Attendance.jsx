@@ -370,8 +370,8 @@ const Attendance = () => {
     const [missedPunchWarning, setMissedPunchWarning] = useState(null); // { dates: ['2026-05-01', ...] }
 
     // 1. Fetch Daily Records (for "Mark Attendance" tab)
-    const fetchDailyRecords = useCallback(async () => {
-        if (activeTab !== 'mark_attendance') return;
+    const fetchDailyRecords = useCallback(async (force = false) => {
+        if (!force && activeTab !== 'mark_attendance') return;
         setLoading(true);
         try {
             const res = await attendanceService.getMyRecords(selectedDate, selectedDate);
@@ -391,6 +391,17 @@ const Attendance = () => {
                 const missedDates = [];
                 let hasTodayActiveSession = false;
 
+                // Fetch recent correction requests to check if any are pending/approved for missed dates
+                let activeCorrections = [];
+                try {
+                    const corrRes = await attendanceService.getCorrectionRequests({ limit: 50 });
+                    if (corrRes && corrRes.data) {
+                        activeCorrections = corrRes.data;
+                    }
+                } catch (corrErr) {
+                    console.error("Failed to fetch correction requests in warning check", corrErr);
+                }
+
                 for (const session of recentRes.data) {
                     if (!session.time_out) {
                         const sessionDate = new Date(session.time_in);
@@ -403,7 +414,14 @@ const Attendance = () => {
 
                             // Show banner if not already escalated to ABSENT/REJECTED and within deadline
                             const isNotProcessed = !['ABSENT', 'REJECTED'].includes(session.status);
-                            if (isNotProcessed && diffDays <= deadlineDays) {
+
+                            // Hide warning if a pending or approved correction request exists
+                            const hasActiveCorrection = activeCorrections.some(c => {
+                                const reqDateStr = c.request_date ? new Date(c.request_date).toISOString().split('T')[0] : '';
+                                return reqDateStr === sessionDateStr && ['pending', 'approved'].includes(c.status);
+                            });
+
+                            if (isNotProcessed && diffDays <= deadlineDays && !hasActiveCorrection) {
                                 missedDates.push(sessionDateStr);
                             }
                         } else if (sessionDateStr === todayDateStr) {
@@ -428,8 +446,8 @@ const Attendance = () => {
     }, [selectedDate, activeTab, myShift]);
 
     // 2. Fetch Monthly Records (for "My Attendance" tab - History & Analytics)
-    const fetchMonthlyRecords = useCallback(async () => {
-        if (activeTab !== 'my_attendance') return;
+    const fetchMonthlyRecords = useCallback(async (force = false) => {
+        if (!force && activeTab !== 'my_attendance') return;
         setLoading(true);
         try {
             const year = reportMonth.split('-')[0];
@@ -805,6 +823,8 @@ const Attendance = () => {
             setExistingRecord(null);
 
             fetchCorrectionHistory();
+            fetchDailyRecords(true);   // Force refresh today's daily log / banners
+            fetchMonthlyRecords(true); // Force refresh history tab
         } catch (error) {
             console.error(error);
             toast.error(error.message || "Failed to submit request");

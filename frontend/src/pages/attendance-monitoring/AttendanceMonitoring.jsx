@@ -63,7 +63,7 @@ const MapRecenter = ({ data, searchTerm, departmentFilter }) => {
     const map = useMap();
     useEffect(() => {
         if (!data || data.length === 0) return;
-        
+
         // Find bounds for all markers
         const points = [];
         data.forEach(user => {
@@ -111,7 +111,7 @@ const ClusterDrillDownPopup = ({ data, onClose }) => {
             {/* Header */}
             <div className="p-3 border-b border-slate-100 dark:border-github-dark-border bg-slate-50/50 dark:bg-github-dark-subtle/20 relative">
                 {selectedUser && (
-                    <button 
+                    <button
                         onClick={() => setSelectedUser(null)}
                         className="absolute left-2 top-2.5 p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-500 dark:text-slate-400"
                     >
@@ -133,7 +133,7 @@ const ClusterDrillDownPopup = ({ data, onClose }) => {
             <div className="relative overflow-hidden bg-white dark:bg-[#0d1117]" style={{ height: '300px' }}>
                 <AnimatePresence initial={false} mode="wait">
                     {!selectedUser ? (
-                        <motion.div 
+                        <motion.div
                             key="list"
                             initial={{ x: -20, opacity: 0 }}
                             animate={{ x: 0, opacity: 1 }}
@@ -142,7 +142,7 @@ const ClusterDrillDownPopup = ({ data, onClose }) => {
                             className="absolute inset-0 overflow-y-auto p-2 space-y-1.5 custom-scrollbar"
                         >
                             {data.map((m, idx) => (
-                                <div 
+                                <div
                                     key={idx}
                                     onClick={() => setSelectedUser(m)}
                                     className="flex items-center gap-3 p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-xl cursor-pointer transition-all border border-transparent hover:border-indigo-100 dark:hover:border-indigo-500/20 group"
@@ -168,7 +168,7 @@ const ClusterDrillDownPopup = ({ data, onClose }) => {
                             ))}
                         </motion.div>
                     ) : (
-                        <motion.div 
+                        <motion.div
                             key="detail"
                             initial={{ x: 20, opacity: 0 }}
                             animate={{ x: 0, opacity: 1 }}
@@ -185,7 +185,7 @@ const ClusterDrillDownPopup = ({ data, onClose }) => {
                                     <p className="text-[10px] text-slate-500 font-medium mt-0.5">{selectedUser.type === 'combined' ? 'Full Session Details' : selectedUser.user.role}</p>
                                 </div>
                             </div>
-                            
+
                             <div className="space-y-3">
                                 {selectedUser.type === 'combined' ? (
                                     <>
@@ -338,150 +338,125 @@ const AttendanceMonitoring = () => {
     const fetchData = async (silent = false) => {
         if (!silent) setLoading(true);
         try {
-            // 1. Fetch Users and Attendance Records in Parallel
-            const [usersRes, attendanceRes] = await Promise.all([
-                adminService.getAllUsers(),
-                attendanceService.getRealTimeAttendance(selectedDate)
-            ]);
+            // 1. Fetch Dynamic Daily Summary for Admin
+            const res = await attendanceService.getDailySummaryAdmin(selectedDate);
+            const staff = res.data || [];
 
-            const users = (usersRes.users || []).filter(u => u.is_active && !u.is_deleted);
-            const records = attendanceRes.data || [];
-
-            // 2. Merge Data
-            const mergedData = users.map(user => {
-                const userRecords = records.filter(r => r.user_id === user.user_id);
-
-                let sessions = [];
+            // 2. Map Data
+            const mergedData = staff.map(u => {
+                const daySessions = u.sessions || [];
                 let totalMin = 0;
-                let status = 'Absent';
-                let lastLocation = '-';
+                const sessions = daySessions.map(r => {
+                    const inTime = new Date(r.time_in);
+                    const formatTime = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-                if (userRecords.length > 0) {
-                    // Process all sessions
-                    sessions = userRecords.map(r => {
-                        const inTime = new Date(r.time_in);
-                        // Format Time HH:MM AM/PM
-                        const formatTime = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const inStr = formatTime(inTime);
+                    let outStr = '-';
+                    let isActive = !r.time_out && r.status !== 'MISSED_PUNCH';
 
-                        const inStr = formatTime(inTime);
-                        let outStr = '-';
-                        let isActive = true;
-                        let durationMin = 0;
-
-                        if (r.time_out) {
-                            const outTime = new Date(r.time_out);
-                            outStr = formatTime(outTime);
-                            isActive = false;
-                            durationMin = Math.max(0, (outTime - inTime) / 60000);
-                            totalMin += durationMin;
-                        } else {
-                            durationMin = Math.max(0, (new Date() - inTime) / 60000);
-                            totalMin += durationMin;
-                        }
-
-                        // Locations
-                        const inLoc = r.time_in_address || (r.time_in_lat ? `${r.time_in_lat}, ${r.time_in_lng}` : 'Unknown');
-                        const outLoc = r.time_out_address || (r.time_out_lat ? `${r.time_out_lat}, ${r.time_out_lng}` : null);
-
-                        const sessionHours = `${(durationMin / 60).toFixed(1)} hrs`;
-
-                        return {
-                            rawIn: inTime,
-                            rawOut: r.time_out ? new Date(r.time_out) : null,
-                            in: inStr,
-                            out: outStr,
-                            date: inTime.toLocaleDateString(),
-                            isActive,
-                            inLocation: inLoc,
-                            outLocation: outLoc,
-                            lateMinutes: r.late_minutes || 0,
-                            isLate: (r.late_minutes || 0) > 0,
-                            lateReason: r.late_reason,
-                            inImage: r.time_in_image,
-                            outImage: r.time_out_image,
-                            inLat: r.time_in_lat,
-                            inLng: r.time_in_lng,
-                            outLat: r.time_out_lat,
-                            outLng: r.time_out_lng,
-                            hours: sessionHours
-                        };
-                    });
-
-                    // Determine overall status
-                    const latest = userRecords[0]; // records are typically ordered DESC by time_in in backend
-                    lastLocation = latest.time_in_address || (latest.time_in_lat ? `${latest.time_in_lat}, ${latest.time_in_lng}` : '-');
-
-                    // Extract late reason - prioritize the latest session if active, or just the latest record
-                    const lateReason = latest.late_reason || '';
-
-                    // Check if *currently* active
-                    const isCurrentlyActive = sessions.some(s => s.isActive);
-
-                    let allStatuses = [];
-
-                    if (isCurrentlyActive) {
-                        allStatuses.push('Active');
-                        if (userRecords.some(r => r.late_minutes > 0)) allStatuses.push('Late');
-                        status = (latest.late_minutes > 0) ? 'Late Active' : 'Active';
-                    } else {
-                        if (latest.status === 'Absent' || latest.status === 'ABSENT') {
-                            allStatuses.push('Absent');
-                            status = 'Absent';
-                        } else {
-                            if (latest.status === 'MISSED_PUNCH' || latest.status === 'Missed Punch') allStatuses.push('Missed Punch');
-                            if (userRecords.some(r => r.late_minutes > 0)) allStatuses.push('Late');
-                            if ((latest.overtime_hours || 0) > 0 || latest.status === 'OVERTIME' || latest.status === 'Overtime') allStatuses.push('Overtime');
-
-                            if (allStatuses.length === 0) allStatuses.push('Present');
-
-                            status = allStatuses.includes('Missed Punch') ? 'Missed Punch' :
-                                allStatuses.includes('Overtime') ? 'Overtime' :
-                                    allStatuses.includes('Late') ? 'Late' : 'Present';
-                        }
+                    if (r.time_out) {
+                        const outTime = new Date(r.time_out);
+                        outStr = formatTime(outTime);
+                        totalMin += Math.max(0, (outTime - inTime) / 60000);
+                    } else if (isActive) {
+                        totalMin += Math.max(0, (new Date() - inTime) / 60000);
                     }
 
+                    // Locations
+                    const inLoc = r.time_in_address || (r.time_in_lat ? `${r.time_in_lat}, ${r.time_in_lng}` : 'Unknown');
+                    const outLoc = r.time_out_address || (r.time_out_lat ? `${r.time_out_lat}, ${r.time_out_lng}` : null);
+
                     return {
-                        id: user.user_id,
-                        name: user.user_name || 'Unknown',
-                        role: user.desg_name || user.designation_title || 'Employee',
-                        avatar: (user.profile_image_url && user.profile_image_url.trim() !== '') ? user.profile_image_url : (user.user_name ? user.user_name.trim().charAt(0).toUpperCase() : 'U') || 'U',
-                        department: user.dept_name || user.department_title || 'General',
-                        sessions,
-                        status,
-                        allStatuses,
-                        totalHours: totalMin > 0 ? `${(totalMin / 60).toFixed(1)} hrs` : '-', // totalMin calculation usually happens in backend or needs simple diff sum here
-                        location: lastLocation,
-                        lateReason // Add to object
+                        rawIn: inTime,
+                        rawOut: r.time_out ? new Date(r.time_out) : null,
+                        in: inStr,
+                        out: outStr,
+                        date: inTime.toLocaleDateString(),
+                        isActive,
+                        inLocation: inLoc,
+                        outLocation: outLoc,
+                        lateMinutes: r.late_minutes || 0,
+                        isLate: (r.late_minutes || 0) > 0,
+                        lateReason: r.late_reason,
+                        inImage: r.time_in_image,
+                        outImage: r.time_out_image,
+                        inLat: r.time_in_lat,
+                        inLng: r.time_in_lng,
+                        outLat: r.time_out_lat,
+                        outLng: r.time_out_lng
                     };
-                }
+                });
+
+                // Standardize Status String to match frontend layout colors
+                const statusMap = {
+                    'WEEK_OFF': 'Week Off',
+                    'HOLIDAY': 'Holiday',
+                    'LEAVE': 'Leave',
+                    'ABSENT': 'Absent',
+                    'PRESENT': 'Present',
+                    'LATE': 'Late',
+                    'OVERTIME': 'Overtime',
+                    'MISSED_PUNCH': 'Missed Punch',
+                    'Active': 'Active',
+                    'Late Active': 'Late Active'
+                };
+                const status = statusMap[u.status] || u.status || 'Absent';
+
+                const totalHrs = u.total_hours > 0 ? `${Number(u.total_hours).toFixed(1)} hrs` : '-';
+                const expectedHrs = u.expected_hours !== undefined && u.expected_hours !== null && u.expected_hours > 0 ? `${Number(u.expected_hours).toFixed(1)} hrs` : '-';
+                const lastLocation = u.sessions && u.sessions.length > 0
+                    ? u.sessions[0].time_in_address || (u.sessions[0].time_in_lat ? `${u.sessions[0].time_in_lat}, ${u.sessions[0].time_in_lng}` : '-')
+                    : '-';
+
+                // Recreate allStatuses to retain compatibility with stats counts
+                let allStatuses = [];
+                if (status === 'Late Active') { allStatuses.push('Active', 'Late'); }
+                else if (status === 'Active') { allStatuses.push('Active'); }
+                else if (status === 'Present') { allStatuses.push('Present'); }
+                else if (status === 'Late') { allStatuses.push('Present', 'Late'); }
+                else if (status === 'Overtime') { allStatuses.push('Present', 'Overtime'); }
+                else if (status === 'Missed Punch') { allStatuses.push('Missed Punch'); }
+                else if (status === 'Week Off') { allStatuses.push('Week Off'); }
+                else if (status === 'Holiday') { allStatuses.push('Holiday'); }
+                else if (status === 'Leave') { allStatuses.push('Leave'); }
+                else { allStatuses.push('Absent'); }
 
                 return {
-                    id: user.user_id,
-                    name: user.user_name || 'Unknown',
-                    role: user.desg_name || user.designation_title || 'Employee',
-                    avatar: user.profile_image_url || (user.user_name || 'U').charAt(0).toUpperCase(),
-                    department: user.dept_name || user.department_title || 'General',
-                    sessions: [],
-                    status: 'Absent',
-                    totalHours: '-',
-                    location: '-',
-                    lateReason: ''
+                    id: u.user_id,
+                    name: u.user_name || 'Unknown',
+                    role: u.desg_name || 'Employee',
+                    avatar: (u.profile_image_url && u.profile_image_url.trim() !== '') ? u.profile_image_url : (u.user_name ? u.user_name.trim().charAt(0).toUpperCase() : 'U') || 'U',
+                    department: u.dept_name || 'General',
+                    sessions,
+                    status,
+                    allStatuses,
+                    totalHours: totalHrs,
+                    expectedHours: expectedHrs,
+                    location: lastLocation,
+                    lateReason: u.late_reason || ''
                 };
             });
 
-            // 3. Sort: Active/Present/Late first, then Absent
-            mergedData.sort((a, b) => {
-                const isAbsentA = a.status === 'Absent';
-                const isAbsentB = b.status === 'Absent';
-                if (isAbsentA === isAbsentB) return 0;
-                return isAbsentA ? 1 : -1;
-            });
+            // 3. Sort: Active/Present/Late/Overtime first, then Absent, then Week Off/Holiday/Leave
+            const statusWeights = {
+                'Active': 10,
+                'Late Active': 9,
+                'Late': 8,
+                'Overtime': 7,
+                'Present': 6,
+                'Missed Punch': 5,
+                'Absent': 4,
+                'Leave': 3,
+                'Holiday': 2,
+                'Week Off': 1
+            };
+            mergedData.sort((a, b) => (statusWeights[b.status] || 0) - (statusWeights[a.status] || 0));
 
             setAttendanceData(mergedData);
 
             // 4. Calculate Stats precisely from merged data for consistency
             setStats({
-                present: mergedData.filter(d => d.status !== 'Absent').length,
+                present: mergedData.filter(d => d.status !== 'Absent' && d.status !== 'Week Off' && d.status !== 'Holiday' && d.status !== 'Leave').length,
                 late: mergedData.filter(d => d.allStatuses ? d.allStatuses.includes('Late') : d.status.includes('Late')).length,
                 absent: mergedData.filter(d => d.status === 'Absent').length,
                 active: mergedData.filter(d => d.allStatuses ? d.allStatuses.includes('Active') : d.status.includes('Active')).length
@@ -613,6 +588,9 @@ const AttendanceMonitoring = () => {
             case 'Half Day': return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400';
             case 'Overtime': return 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400';
             case 'Missed Punch': return 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400';
+            case 'Week Off': return 'bg-slate-100 text-slate-500 dark:bg-github-dark-subtle dark:text-github-dark-muted border border-dashed border-slate-200 dark:border-github-dark-border';
+            case 'Holiday': return 'bg-sky-50 text-sky-600 dark:bg-sky-950/20 dark:text-sky-400 border border-sky-100 dark:border-sky-900/30';
+            case 'Leave': return 'bg-purple-50 text-purple-600 dark:bg-purple-950/20 dark:text-purple-400 border border-purple-100 dark:border-purple-900/30';
             default: return 'bg-slate-100 text-slate-700 dark:bg-github-dark-subtle dark:text-slate-300';
         }
     };
@@ -678,6 +656,7 @@ const AttendanceMonitoring = () => {
             await attendanceService.updateCorrectionStatus(acr_id, status, reviewComment, overrides);
             toast.success(`Request ${status} successfully`);
             fetchCorrectionRequests();
+            fetchData(true); // Refetch live dashboard data silently
             if (selectedRequestData && selectedRequestData.acr_id === acr_id) {
                 fetchRequestDetail(acr_id);
             }
@@ -695,6 +674,9 @@ const AttendanceMonitoring = () => {
         const late = attendanceData.filter(d => d.status === 'Late').length;
         const present = attendanceData.filter(d => d.status === 'Present').length;
         const absent = attendanceData.filter(d => d.status === 'Absent').length;
+        const weekOff = attendanceData.filter(d => d.status === 'Week Off').length;
+        const holiday = attendanceData.filter(d => d.status === 'Holiday').length;
+        const leave = attendanceData.filter(d => d.status === 'Leave').length;
 
         return [
             { name: 'Present', value: present, color: '#10b981' },
@@ -703,6 +685,9 @@ const AttendanceMonitoring = () => {
             { name: 'Missed Punch', value: missedPunch, color: '#f43f5e' },
             { name: 'Absent', value: absent, color: '#ef4444' },
             { name: 'Active', value: active, color: '#3b82f6' },
+            { name: 'Week Off', value: weekOff, color: '#6b7280' },
+            { name: 'Holiday', value: holiday, color: '#0ea5e9' },
+            { name: 'Leave', value: leave, color: '#a855f7' },
         ].filter(item => item.value > 0);
     };
 
@@ -881,918 +866,922 @@ const AttendanceMonitoring = () => {
             <DashboardLayout title="Live Attendance" noPadding={true}>
             <div className="p-3 space-y-3" style={{ zoom: 0.8 }}>
 
-                {/* Tabs */}
-                <div className="flex space-x-1 bg-slate-100 dark:bg-github-dark-subtle p-1 rounded-xl w-fit">
-                    <button
-                        onClick={() => setActiveTab('live')}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${activeTab === 'live' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'}`}
-                    >
-                        <LayoutGrid size={16} className={`${activeTab === 'live' ? 'text-indigo-500' : 'text-slate-400'} -mt-[1px]`} />
-                        <span className="leading-none">Live Dashboard</span>
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('requests')}
-                        className={`relative flex items-center gap-2 px-6 py-3 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${activeTab === 'requests' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'}`}
-                    >
-                        <FileText size={16} className={`${activeTab === 'requests' ? 'text-indigo-500' : 'text-slate-400'} -mt-[1px]`} />
-                        <span className="leading-none">Correction Requests</span>
-                        {requestCount > 0 && (
-                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full animate-pulse border-2 border-slate-100 dark:border-github-dark-subtle">
-                                {requestCount}
-                            </span>
-                        )}
-                    </button>
-                </div>
+                    {/* Tabs */}
+                    <div className="flex space-x-1 bg-slate-100 dark:bg-github-dark-subtle p-1 rounded-xl w-fit">
+                        <button
+                            onClick={() => setActiveTab('live')}
+                            className={`flex items-center gap-2 px-6 py-3 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${activeTab === 'live' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                            <LayoutGrid size={16} className={`${activeTab === 'live' ? 'text-indigo-500' : 'text-slate-400'} -mt-[1px]`} />
+                            <span className="leading-none">Live Dashboard</span>
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('requests')}
+                            className={`relative flex items-center gap-2 px-6 py-3 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${activeTab === 'requests' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        >
+                            <FileText size={16} className={`${activeTab === 'requests' ? 'text-indigo-500' : 'text-slate-400'} -mt-[1px]`} />
+                            <span className="leading-none">Correction Requests</span>
+                            {requestCount > 0 && activeTab !== 'requests' && (
+                                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full animate-pulse border-2 border-slate-100 dark:border-github-dark-subtle">
+                                    {requestCount}
+                                </span>
+                            )}
+                        </button>
+                    </div>
 
-                {activeTab === 'live' ? (
-                    <>
-                        {/* Stats Cards */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                            {statCards.map((stat, index) => (
-                                <div key={index} className="bg-white dark:bg-dark-card p-4 rounded-lg shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between transition-colors duration-300">
-                                    <div>
-                                        <p className="text-sm font-medium text-slate-500 dark:text-github-dark-muted">{stat.label}</p>
-                                        <p className="text-2xl font-bold text-slate-800 dark:text-github-dark-text mt-1">{stat.value}</p>
-                                    </div>
-                                    <div className={`p-3 rounded-lg ${stat.bg} ${stat.color}`}>
-                                        {stat.icon}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Main Content */}
-                        <div className="bg-white dark:bg-dark-card rounded-lg shadow-sm border border-slate-200 dark:border-github-dark-border overflow-hidden transition-colors duration-300">
-
-                            {/* Premium Control Center */}
-                            <div className="p-6 border-b border-slate-200 dark:border-github-dark-border bg-white dark:bg-dark-card space-y-6">
-                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                                    <div className="flex flex-col">
-                                        <div className="flex items-center gap-3">
-                                            <h2 className="text-2xl font-black text-slate-900 dark:text-github-dark-text tracking-tighter uppercase">
-                                                {activeView === 'cards' ? 'Employee Overview' : activeView === 'graph' ? 'Live Analytics' : 'Activity Timeline'}
-                                            </h2>
-                                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-md">
-                                                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
-                                                <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">Real-time</span>
-                                            </div>
+                    {activeTab === 'live' ? (
+                        <>
+                            {/* Stats Cards */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                {statCards.map((stat, index) => (
+                                    <div key={index} className="bg-white dark:bg-dark-card p-4 rounded-lg shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between transition-colors duration-300">
+                                        <div>
+                                            <p className="text-sm font-medium text-slate-500 dark:text-github-dark-muted">{stat.label}</p>
+                                            <p className="text-2xl font-bold text-slate-800 dark:text-github-dark-text mt-1">{stat.value}</p>
                                         </div>
-                                        <p className="text-xs text-slate-400 dark:text-github-dark-muted font-medium mt-1">
-                                            {activeView === 'cards' && 'Monitoring all on-duty staff status and session availability.'}
-                                            {activeView === 'graph' && 'Deep dive into attendance metrics, trends, and department KPIs.'}
-                                            {activeView === 'table' && 'High-density Gantt visualization of daily employee movements.'}
-                                        </p>
-                                    </div>
-
-                                    <div className="flex items-center gap-3 bg-slate-50 dark:bg-github-dark-subtle/30 p-1.5 rounded-lg border border-slate-100 dark:border-github-dark-border">
-                                        <div className="flex items-center gap-3 w-64">
-                                            <DatePicker
-                                                value={selectedDate}
-                                                onChange={(date) => setSelectedDate(date)}
-                                            />
-                                        </div>
-                                        <button
-                                            onClick={() => fetchData()}
-                                            className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-white dark:hover:bg-dark-card rounded-md transition-all shadow-sm group"
-                                            title="Sync Data"
-                                        >
-                                            <RefreshCw size={16} className="group-active:rotate-180 transition-transform duration-500" />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-4 border-t border-slate-50 dark:border-github-dark-border/30">
-                                    <div className="flex items-center gap-4 flex-1">
-                                        <div className="relative flex-1 max-w-md group">
-                                            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-                                            <input
-                                                type="text"
-                                                placeholder="Search by name, role or department..."
-                                                value={searchTerm}
-                                                onChange={(e) => setSearchTerm(e.target.value)}
-                                                className="pl-11 pr-4 py-2.5 text-xs w-full rounded-lg border border-slate-200 dark:border-github-dark-border bg-slate-50 dark:bg-github-dark-subtle/20 text-slate-900 dark:text-github-dark-text focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-dark-card outline-none transition-all shadow-inner"
-                                            />
-                                        </div>
-                                        <div className="relative">
-                                            <button
-                                                onClick={() => setIsDeptDropdownOpen(!isDeptDropdownOpen)}
-                                                className="pl-10 pr-8 py-2.5 text-xs rounded-lg border border-slate-200 dark:border-github-dark-border bg-slate-50 dark:bg-github-dark-subtle/20 text-slate-700 dark:text-github-dark-text outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner min-w-[155px] font-bold text-left flex items-center justify-between gap-2"
-                                            >
-                                                <span className="truncate">
-                                                    {DEPARTMENTS.find(d => d.value === departmentFilter)?.label || 'All Departments'}
-                                                </span>
-                                                <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 shrink-0 ${isDeptDropdownOpen ? 'rotate-180' : ''}`} />
-                                            </button>
-                                            <Filter size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-
-                                            <AnimatePresence>
-                                                {isDeptDropdownOpen && (
-                                                    <>
-                                                        <div 
-                                                            className="fixed inset-0 z-[80]" 
-                                                            onClick={() => setIsDeptDropdownOpen(false)} 
-                                                        />
-                                                        <motion.div
-                                                            initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                                                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                                                            exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                                                            transition={{ duration: 0.15 }}
-                                                            className="absolute top-full left-0 mt-1.5 w-full min-w-[180px] bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-github-dark-border rounded-xl shadow-2xl overflow-hidden z-[90]"
-                                                        >
-                                                            <div className="py-1 max-h-60 overflow-y-auto custom-scrollbar">
-                                                                {DEPARTMENTS.map((dept) => {
-                                                                    const isSelected = departmentFilter === dept.value;
-                                                                    return (
-                                                                        <button
-                                                                            key={dept.value}
-                                                                            onClick={() => {
-                                                                                setDepartmentFilter(dept.value);
-                                                                                setIsDeptDropdownOpen(false);
-                                                                            }}
-                                                                            className={`w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold transition-colors text-left ${
-                                                                                isSelected
-                                                                                    ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
-                                                                                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-                                                                            }`}
-                                                                        >
-                                                                            <span>{dept.label}</span>
-                                                                            {isSelected && <Check size={12} className="text-indigo-500" />}
-                                                                        </button>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                        </motion.div>
-                                                    </>
-                                                )}
-                                            </AnimatePresence>
+                                        <div className={`p-3 rounded-lg ${stat.bg} ${stat.color}`}>
+                                            {stat.icon}
                                         </div>
                                     </div>
-
-                                    {/* Uniform View Switcher */}
-                                    <div className="flex space-x-1 bg-slate-100 dark:bg-github-dark-subtle p-1 rounded-lg w-fit border border-slate-200 dark:border-github-dark-border/50">
-                                        {[
-                                            { id: 'cards', label: 'Overview', icon: LayoutGrid },
-                                            { id: 'graph', label: 'Analytics', icon: BarChartIcon },
-                                            { id: 'table', label: 'Timeline', icon: Table },
-                                            { id: 'map', label: 'Map View', icon: MapPin }
-                                        ].map((view) => (
-                                            <button
-                                                key={view.id}
-                                                onClick={() => setActiveView(view.id)}
-                                                className={`flex items-center gap-2 px-5 py-3 rounded-md text-[11px] font-black uppercase tracking-tighter transition-all duration-200 ${
-                                                    activeView === view.id 
-                                                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' 
-                                                    : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'
-                                                }`}
-                                            >
-                                                <view.icon size={14} className={`${activeView === view.id ? 'text-indigo-500' : 'text-slate-400'} -mt-[0.5px]`} />
-                                                <span className="leading-none">{view.label}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
+                                ))}
                             </div>
 
+                            {/* Main Content */}
+                            <div className="bg-white dark:bg-dark-card rounded-lg shadow-sm border border-slate-200 dark:border-github-dark-border overflow-hidden transition-colors duration-300">
 
-                            <div className="p-6 bg-slate-50/50 dark:bg-github-dark-subtle/10 min-h-[500px]">
-                                {activeView === 'table' ? (
-                                    <div className="bg-white dark:bg-dark-card rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-                                        <div className="overflow-x-auto custom-scrollbar">
-                                            <div className="min-w-[2000px]">
-                                                {/* Timeline Header */}
-                                                <div className="flex bg-slate-50 dark:bg-github-dark-subtle border-b border-slate-200 dark:border-github-dark-border">
-                                                    <div className="w-[300px] shrink-0 px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-200 dark:border-github-dark-border sticky left-0 bg-slate-50 dark:bg-github-dark-subtle z-30">
-                                                        Employee Details
-                                                    </div>
-                                                    <div className="flex-1 flex">
-                                                        {Array.from({ length: 24 }, (_, i) => i).map(hour => (
-                                                            <div key={hour} className="flex-1 py-4 text-center text-[10px] font-bold text-slate-400 border-r border-slate-200 dark:border-github-dark-border/30 last:border-r-0">
-                                                                {hour === 0 ? '12 AM' : hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`}
-                                                            </div>
-                                                        ))}
-                                                    </div>
+                                {/* Premium Control Center */}
+                                <div className="p-6 border-b border-slate-200 dark:border-github-dark-border bg-white dark:bg-dark-card space-y-6">
+                                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                                        <div className="flex flex-col">
+                                            <div className="flex items-center gap-3">
+                                                <h2 className="text-2xl font-black text-slate-900 dark:text-github-dark-text tracking-tighter uppercase">
+                                                    {activeView === 'cards' ? 'Employee Overview' : activeView === 'graph' ? 'Live Analytics' : 'Activity Timeline'}
+                                                </h2>
+                                                <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-md">
+                                                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
+                                                    <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">Real-time</span>
                                                 </div>
+                                            </div>
+                                            <p className="text-xs text-slate-400 dark:text-github-dark-muted font-medium mt-1">
+                                                {activeView === 'cards' && 'Monitoring all on-duty staff status and session availability.'}
+                                                {activeView === 'graph' && 'Deep dive into attendance metrics, trends, and department KPIs.'}
+                                                {activeView === 'table' && 'High-density Gantt visualization of daily employee movements.'}
+                                            </p>
+                                        </div>
 
-                                                {/* Timeline Rows */}
-                                                <div className="divide-y divide-slate-100 dark:divide-github-dark-border/50">
-                                                    {loading && attendanceData.length === 0 ? (
-                                                        <div className="p-10 text-center text-slate-400">Loading timeline...</div>
-                                                    ) : filteredData.length === 0 ? (
-                                                        <div className="p-10 text-center text-slate-400">No employees found.</div>
-                                                    ) : (
-                                                        filteredData.map((item) => {
-                                                            const startHour = 0;
-                                                            const totalHours = 24;
-                                                            const timeToPct = (date) => {
-                                                                if (!date) return null;
-                                                                const h = date.getHours();
-                                                                const m = date.getMinutes();
-                                                                const totalMinutes = (h - startHour) * 60 + m;
-                                                                return Math.max(0, Math.min(100, (totalMinutes / (totalHours * 60)) * 100));
-                                                            };
+                                        <div className="flex items-center gap-3 bg-slate-50 dark:bg-github-dark-subtle/30 p-1.5 rounded-lg border border-slate-100 dark:border-github-dark-border">
+                                            <div className="flex items-center gap-3 w-64">
+                                                <DatePicker
+                                                    value={selectedDate}
+                                                    onChange={(date) => setSelectedDate(date)}
+                                                />
+                                            </div>
+                                            <button
+                                                onClick={() => fetchData()}
+                                                className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-white dark:hover:bg-dark-card rounded-md transition-all shadow-sm group"
+                                                title="Sync Data"
+                                            >
+                                                <RefreshCw size={16} className="group-active:rotate-180 transition-transform duration-500" />
+                                            </button>
+                                        </div>
+                                    </div>
 
-                                                            return (
-                                                                <div key={item.id} className="flex hover:bg-slate-50/50 dark:hover:bg-indigo-500/5 transition-colors group cursor-pointer" onClick={() => setSelectedLiveUser(item)}>
-                                                                    {/* Employee Info (Sticky) */}
-                                                                    <div className="w-[300px] shrink-0 px-6 py-4 flex items-center gap-3 border-r border-slate-200 dark:border-github-dark-border sticky left-0 bg-white dark:bg-dark-card group-hover:bg-slate-50 dark:group-hover:bg-github-dark-subtle z-20">
-                                                                        <div className="flex items-center gap-4">
-                                                                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm overflow-hidden ${item.status === 'Absent' ? 'bg-slate-100 text-slate-400 dark:bg-github-dark-subtle dark:text-github-dark-muted' : 'bg-gradient-to-br from-indigo-500/10 to-purple-600/10 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20'}`}>
-                                                                                {item.avatar.startsWith('http') ? (
-                                                                                    <img src={item.avatar} alt={item.name} className="w-full h-full object-cover" />
-                                                                                ) : (
-                                                                                    item.avatar
-                                                                                )}
-                                                                            </div>
-                                                                            <div className="min-w-0">
-                                                                                <p className="font-bold text-sm text-slate-800 dark:text-github-dark-text truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{item.name}</p>
-                                                                                <div className="flex items-center gap-2 mt-0.5">
-                                                                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter ${item.status === 'Absent' ? 'bg-slate-100 text-slate-400 dark:bg-github-dark-subtle' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800/30'}`}>
-                                                                                        {item.status.split(' ')[0]}
-                                                                                    </span>
-                                                                                    <span className="text-[10px] text-slate-400 dark:text-github-dark-muted font-mono font-bold">
-                                                                                        {item.totalHours && item.totalHours.toLowerCase().includes('hrs') ? item.totalHours : `${item.totalHours} Hrs`}
-                                                                                    </span>
+                                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-4 border-t border-slate-50 dark:border-github-dark-border/30">
+                                        <div className="flex items-center gap-4 flex-1">
+                                            <div className="relative flex-1 max-w-md group">
+                                                <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search by name, role or department..."
+                                                    value={searchTerm}
+                                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                                    className="pl-11 pr-4 py-2.5 text-xs w-full rounded-lg border border-slate-200 dark:border-github-dark-border bg-slate-50 dark:bg-github-dark-subtle/20 text-slate-900 dark:text-github-dark-text focus:ring-2 focus:ring-indigo-500 focus:bg-white dark:focus:bg-dark-card outline-none transition-all shadow-inner"
+                                                />
+                                            </div>
+                                            <div className="relative">
+                                                <button
+                                                    onClick={() => setIsDeptDropdownOpen(!isDeptDropdownOpen)}
+                                                    className="pl-10 pr-8 py-2.5 text-xs rounded-lg border border-slate-200 dark:border-github-dark-border bg-slate-50 dark:bg-github-dark-subtle/20 text-slate-700 dark:text-github-dark-text outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner min-w-[155px] font-bold text-left flex items-center justify-between gap-2"
+                                                >
+                                                    <span className="truncate">
+                                                        {DEPARTMENTS.find(d => d.value === departmentFilter)?.label || 'All Departments'}
+                                                    </span>
+                                                    <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 shrink-0 ${isDeptDropdownOpen ? 'rotate-180' : ''}`} />
+                                                </button>
+                                                <Filter size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+
+                                                <AnimatePresence>
+                                                    {isDeptDropdownOpen && (
+                                                        <>
+                                                            <div
+                                                                className="fixed inset-0 z-[80]"
+                                                                onClick={() => setIsDeptDropdownOpen(false)}
+                                                            />
+                                                            <motion.div
+                                                                initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                                exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                                                                transition={{ duration: 0.15 }}
+                                                                className="absolute top-full left-0 mt-1.5 w-full min-w-[180px] bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-github-dark-border rounded-xl shadow-2xl overflow-hidden z-[90]"
+                                                            >
+                                                                <div className="py-1 max-h-60 overflow-y-auto custom-scrollbar">
+                                                                    {DEPARTMENTS.map((dept) => {
+                                                                        const isSelected = departmentFilter === dept.value;
+                                                                        return (
+                                                                            <button
+                                                                                key={dept.value}
+                                                                                onClick={() => {
+                                                                                    setDepartmentFilter(dept.value);
+                                                                                    setIsDeptDropdownOpen(false);
+                                                                                }}
+                                                                                className={`w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold transition-colors text-left ${isSelected
+                                                                                        ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
+                                                                                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                                                                    }`}
+                                                                            >
+                                                                                <span>{dept.label}</span>
+                                                                                {isSelected && <Check size={12} className="text-indigo-500" />}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </motion.div>
+                                                        </>
+                                                    )}
+                                                </AnimatePresence>
+                                            </div>
+                                        </div>
+
+                                        {/* Uniform View Switcher */}
+                                        <div className="flex space-x-1 bg-slate-100 dark:bg-github-dark-subtle p-1 rounded-lg w-fit border border-slate-200 dark:border-github-dark-border/50">
+                                            {[
+                                                { id: 'cards', label: 'Overview', icon: LayoutGrid },
+                                                { id: 'graph', label: 'Analytics', icon: BarChartIcon },
+                                                { id: 'table', label: 'Timeline', icon: Table },
+                                                { id: 'map', label: 'Map View', icon: MapPin }
+                                            ].map((view) => (
+                                                <button
+                                                    key={view.id}
+                                                    onClick={() => setActiveView(view.id)}
+                                                    className={`flex items-center gap-2 px-5 py-3 rounded-md text-[11px] font-black uppercase tracking-tighter transition-all duration-200 ${activeView === view.id
+                                                            ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                                                            : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'
+                                                        }`}
+                                                >
+                                                    <view.icon size={14} className={`${activeView === view.id ? 'text-indigo-500' : 'text-slate-400'} -mt-[0.5px]`} />
+                                                    <span className="leading-none">{view.label}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+
+                                <div className="p-6 bg-slate-50/50 dark:bg-github-dark-subtle/10 min-h-[500px]">
+                                    {activeView === 'table' ? (
+                                        <div className="bg-white dark:bg-dark-card rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-500">
+                                            <div className="overflow-x-auto custom-scrollbar">
+                                                <div className="min-w-[2000px]">
+                                                    {/* Timeline Header */}
+                                                    <div className="flex bg-slate-50 dark:bg-github-dark-subtle border-b border-slate-200 dark:border-github-dark-border">
+                                                        <div className="w-[300px] shrink-0 px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-200 dark:border-github-dark-border sticky left-0 bg-slate-50 dark:bg-github-dark-subtle z-30">
+                                                            Employee Details
+                                                        </div>
+                                                        <div className="flex-1 flex">
+                                                            {Array.from({ length: 24 }, (_, i) => i).map(hour => (
+                                                                <div key={hour} className="flex-1 py-4 text-center text-[10px] font-bold text-slate-400 border-r border-slate-200 dark:border-github-dark-border/30 last:border-r-0">
+                                                                    {hour === 0 ? '12 AM' : hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Timeline Rows */}
+                                                    <div className="divide-y divide-slate-100 dark:divide-github-dark-border/50">
+                                                        {loading && attendanceData.length === 0 ? (
+                                                            <div className="p-10 text-center text-slate-400">Loading timeline...</div>
+                                                        ) : filteredData.length === 0 ? (
+                                                            <div className="p-10 text-center text-slate-400">No employees found.</div>
+                                                        ) : (
+                                                            filteredData.map((item) => {
+                                                                const startHour = 0;
+                                                                const totalHours = 24;
+                                                                const timeToPct = (date) => {
+                                                                    if (!date) return null;
+                                                                    const h = date.getHours();
+                                                                    const m = date.getMinutes();
+                                                                    const totalMinutes = (h - startHour) * 60 + m;
+                                                                    return Math.max(0, Math.min(100, (totalMinutes / (totalHours * 60)) * 100));
+                                                                };
+
+                                                                return (
+                                                                    <div key={item.id} className="flex hover:bg-slate-50/50 dark:hover:bg-indigo-500/5 transition-colors group cursor-pointer" onClick={() => setSelectedLiveUser(item)}>
+                                                                        {/* Employee Info (Sticky) */}
+                                                                        <div className="w-[300px] shrink-0 px-6 py-4 flex items-center gap-3 border-r border-slate-200 dark:border-github-dark-border sticky left-0 bg-white dark:bg-dark-card group-hover:bg-slate-50 dark:group-hover:bg-github-dark-subtle z-20">
+                                                                            <div className="flex items-center gap-4">
+                                                                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm overflow-hidden ${item.status === 'Absent' ? 'bg-slate-100 text-slate-400 dark:bg-github-dark-subtle dark:text-github-dark-muted' : 'bg-gradient-to-br from-indigo-500/10 to-purple-600/10 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/20'}`}>
+                                                                                    {item.avatar.startsWith('http') ? (
+                                                                                        <img src={item.avatar} alt={item.name} className="w-full h-full object-cover" />
+                                                                                    ) : (
+                                                                                        item.avatar
+                                                                                    )}
+                                                                                </div>
+                                                                                <div className="min-w-0">
+                                                                                    <p className="font-bold text-sm text-slate-800 dark:text-github-dark-text truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{item.name}</p>
+                                                                                    <div className="flex items-center gap-2 mt-0.5">
+                                                                                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter ${item.status === 'Absent' ? 'bg-slate-100 text-slate-400 dark:bg-github-dark-subtle' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800/30'}`}>
+                                                                                            {item.status.split(' ')[0]}
+                                                                                        </span>
+                                                                                        <span className="text-[10px] text-slate-400 dark:text-github-dark-muted font-mono font-bold">
+                                                                                            {item.totalHours && item.totalHours.toLowerCase().includes('hrs') ? item.totalHours : `${item.totalHours} Hrs`}
+                                                                                            {item.expectedHours && item.expectedHours !== '-' && ` / ${item.expectedHours}`}
+                                                                                        </span>
+                                                                                    </div>
                                                                                 </div>
                                                                             </div>
                                                                         </div>
-                                                                    </div>
 
-                                                                    {/* Timeline Grid */}
-                                                                    <div className="flex-1 relative flex h-20 items-center">
-                                                                        {/* Hour Grid Lines */}
-                                                                        <div className="absolute inset-0 flex">
-                                                                            {Array.from({ length: 24 }).map((_, i) => (
-                                                                                <div key={i} className="flex-1 border-r border-slate-100 dark:border-github-dark-border/30 last:border-r-0"></div>
-                                                                            ))}
-                                                                        </div>
+                                                                        {/* Timeline Grid */}
+                                                                        <div className="flex-1 relative flex h-20 items-center">
+                                                                            {/* Hour Grid Lines */}
+                                                                            <div className="absolute inset-0 flex">
+                                                                                {Array.from({ length: 24 }).map((_, i) => (
+                                                                                    <div key={i} className="flex-1 border-r border-slate-100 dark:border-github-dark-border/30 last:border-r-0"></div>
+                                                                                ))}
+                                                                            </div>
 
-                                                                        {/* Session Blocks */}
-                                                                        <div className="absolute inset-x-0 h-10 z-10 px-2">
-                                                                            {item.sessions.map((session, sIdx) => {
-                                                                                const startPos = timeToPct(session.rawIn);
-                                                                                const endPos = session.isActive ? timeToPct(new Date()) : timeToPct(session.rawOut);
-                                                                                const width = endPos - startPos;
+                                                                            {/* Session Blocks */}
+                                                                            <div className="absolute inset-x-0 h-10 z-10 px-2">
+                                                                                {item.sessions.map((session, sIdx) => {
+                                                                                    const startPos = timeToPct(session.rawIn);
+                                                                                    const endPos = session.isActive ? timeToPct(new Date()) : timeToPct(session.rawOut);
+                                                                                    const width = endPos - startPos;
 
-                                                                                if (startPos === null) return null;
+                                                                                    if (startPos === null) return null;
 
-                                                                                return (
-                                                                                    <div
-                                                                                        key={sIdx}
-                                                                                        className={`absolute top-0 h-full rounded-md border-2 shadow-[0_4px_12px_rgba(0,0,0,0.05)] transition-all cursor-pointer group/session ${session.isActive ? 'bg-gradient-to-r from-indigo-500 to-blue-500 border-indigo-400/50 animate-pulse' : 'bg-gradient-to-r from-emerald-500 to-teal-500 border-emerald-400/50'}`}
-                                                                                        style={{ left: `${startPos}%`, width: `${Math.max(width, 1)}%` }}
-                                                                                    >
-                                                                                        {/* Floating Labels on active */}
-                                                                                        {session.isActive && (
-                                                                                            <div className="absolute -top-6 left-0 right-0 text-center">
-                                                                                                <span className="text-[8px] font-black bg-indigo-500 text-white px-2 py-0.5 rounded-md uppercase tracking-widest shadow-lg">Active Now</span>
-                                                                                            </div>
-                                                                                        )}
-
-                                                                                        {/* Tooltip on Hover */}
-                                                                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 px-4 py-3 bg-slate-900 dark:bg-github-dark-bg text-white text-[10px] rounded-lg opacity-0 group-hover/session:opacity-100 transition-all duration-300 transform translate-y-2 group-hover/session:translate-y-0 whitespace-nowrap z-30 pointer-events-none shadow-2xl border border-slate-700 dark:border-github-dark-border min-w-[180px]">
-                                                                                            <div className="flex items-center justify-between mb-2">
-                                                                                                <span className="text-slate-400 font-black uppercase tracking-widest text-[8px]">Session Period</span>
-                                                                                                <div className="flex items-center gap-1 text-emerald-400 font-mono font-bold">
-                                                                                                    <Clock size={10} />
-                                                                                                    {session.in} - {session.out}
+                                                                                    return (
+                                                                                        <div
+                                                                                            key={sIdx}
+                                                                                            className={`absolute top-0 h-full rounded-md border-2 shadow-[0_4px_12px_rgba(0,0,0,0.05)] transition-all cursor-pointer group/session ${session.isActive ? 'bg-gradient-to-r from-indigo-500 to-blue-500 border-indigo-400/50 animate-pulse' : 'bg-gradient-to-r from-emerald-500 to-teal-500 border-emerald-400/50'}`}
+                                                                                            style={{ left: `${startPos}%`, width: `${Math.max(width, 1)}%` }}
+                                                                                        >
+                                                                                            {/* Floating Labels on active */}
+                                                                                            {session.isActive && (
+                                                                                                <div className="absolute -top-6 left-0 right-0 text-center">
+                                                                                                    <span className="text-[8px] font-black bg-indigo-500 text-white px-2 py-0.5 rounded-md uppercase tracking-widest shadow-lg">Active Now</span>
                                                                                                 </div>
-                                                                                            </div>
-                                                                                            <div className="flex items-center gap-2 bg-white/5 p-2 rounded-lg border border-white/5">
-                                                                                                <MapPin size={12} className="text-indigo-400 shrink-0" />
-                                                                                                <div className="flex flex-col">
-                                                                                                    <span className="text-[8px] uppercase text-slate-500 font-bold">Location</span>
-                                                                                                    <span className="text-[10px] leading-tight max-w-[140px] truncate">{session.inLocation}</span>
+                                                                                            )}
+
+                                                                                            {/* Tooltip on Hover */}
+                                                                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 px-4 py-3 bg-slate-900 dark:bg-github-dark-bg text-white text-[10px] rounded-lg opacity-0 group-hover/session:opacity-100 transition-all duration-300 transform translate-y-2 group-hover/session:translate-y-0 whitespace-nowrap z-30 pointer-events-none shadow-2xl border border-slate-700 dark:border-github-dark-border min-w-[180px]">
+                                                                                                <div className="flex items-center justify-between mb-2">
+                                                                                                    <span className="text-slate-400 font-black uppercase tracking-widest text-[8px]">Session Period</span>
+                                                                                                    <div className="flex items-center gap-1 text-emerald-400 font-mono font-bold">
+                                                                                                        <Clock size={10} />
+                                                                                                        {session.in} - {session.out}
+                                                                                                    </div>
                                                                                                 </div>
+                                                                                                <div className="flex items-center gap-2 bg-white/5 p-2 rounded-lg border border-white/5">
+                                                                                                    <MapPin size={12} className="text-indigo-400 shrink-0" />
+                                                                                                    <div className="flex flex-col">
+                                                                                                        <span className="text-[8px] uppercase text-slate-500 font-bold">Location</span>
+                                                                                                        <span className="text-[10px] leading-tight max-w-[140px] truncate">{session.inLocation}</span>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-900 dark:bg-github-dark-bg rotate-45 border-r border-b border-slate-700 dark:border-github-dark-border"></div>
                                                                                             </div>
-                                                                                            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-900 dark:bg-github-dark-bg rotate-45 border-r border-b border-slate-700 dark:border-github-dark-border"></div>
                                                                                         </div>
-                                                                                    </div>
-                                                                                );
-                                                                            })}
-                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
 
-                                                                        {/* Background Indicator for late arrival */}
-                                                                        {item.allStatuses && item.allStatuses.includes('Late') && item.sessions[0] && (
-                                                                            <div
-                                                                                className="absolute left-0 h-1 bg-amber-400/20 rounded-full"
-                                                                                style={{ width: `${timeToPct(item.sessions[0].rawIn)}%` }}
-                                                                                title="Late Arrival Period"
-                                                                            ></div>
-                                                                        )}
+                                                                            {/* Background Indicator for late arrival */}
+                                                                            {item.allStatuses && item.allStatuses.includes('Late') && item.sessions[0] && (
+                                                                                <div
+                                                                                    className="absolute left-0 h-1 bg-amber-400/20 rounded-full"
+                                                                                    style={{ width: `${timeToPct(item.sessions[0].rawIn)}%` }}
+                                                                                    title="Late Arrival Period"
+                                                                                ></div>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            );
-                                                        })
-                                                    )}
+                                                                );
+                                                            })
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ) : activeView === 'cards' ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                        {loading && attendanceData.length === 0 ? (
-                                            <div className="col-span-full text-center py-20 text-slate-500 dark:text-github-dark-muted">
-                                                <p>Loading live attendance data...</p>
-                                            </div>
-                                        ) : filteredData.length > 0 ? (
-                                            filteredData.map((item, index) => {
-                                                const showDivider = item.status === 'Absent' && index > 0 && filteredData[index - 1].status !== 'Absent';
+                                    ) : activeView === 'cards' ? (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                            {loading && attendanceData.length === 0 ? (
+                                                <div className="col-span-full text-center py-20 text-slate-500 dark:text-github-dark-muted">
+                                                    <p>Loading live attendance data...</p>
+                                                </div>
+                                            ) : filteredData.length > 0 ? (
+                                                filteredData.map((item, index) => {
+                                                    const showDivider = item.status === 'Absent' && index > 0 && filteredData[index - 1].status !== 'Absent';
 
-                                                return (
-                                                    <React.Fragment key={item.id}>
-                                                        {showDivider && (
-                                                            <div className="col-span-full py-6 flex items-center gap-4">
-                                                                <div className="h-px bg-slate-200 dark:bg-slate-700 flex-1"></div>
-                                                                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Not Checked In</span>
-                                                                <div className="h-px bg-slate-200 dark:bg-slate-700 flex-1"></div>
-                                                            </div>
-                                                        )}
-                                                        <div
-                                                            onClick={() => setSelectedLiveUser(item)}
-                                                            className={`bg-white dark:bg-dark-card rounded-lg border border-slate-200 dark:border-github-dark-border hover:shadow-md transition-all duration-300 overflow-hidden group flex flex-col cursor-pointer ${item.status === 'Absent' ? 'opacity-70 grayscale-[0.3]' : ''}`}
-                                                        >
-                                                            {/* Card Header */}
-                                                            <div className="p-5 flex items-start justify-between">
-                                                                <div className="flex gap-4">
-                                                                    <div className={`w-12 h-12 rounded-lg flex items-center justify-center font-bold text-lg shadow-sm overflow-hidden ${item.status === 'Absent' ? 'bg-slate-100 text-slate-400 dark:bg-github-dark-subtle dark:text-github-dark-muted' : 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white'}`}>
-                                                                        {item.avatar.startsWith('http') ? (
-                                                                            <img src={`${item.avatar}?t=${avatarTimestamp}`} alt={item.name} className="w-full h-full object-cover" />
-                                                                        ) : (
-                                                                            item.avatar
-                                                                        )}
-                                                                    </div>
-                                                                    <div>
-                                                                        <h3 className="font-bold text-slate-800 dark:text-github-dark-text line-clamp-1" title={item.name}>{item.name}</h3>
-                                                                        <p className="text-xs text-slate-500 dark:text-github-dark-muted font-medium">{item.role}</p>
-                                                                    </div>
-                                                                </div>
-                                                                <button className="text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
-                                                                    <MoreVertical size={18} />
-                                                                </button>
-                                                            </div>
-
-                                                            {/* Status Badge Line */}
-                                                            <div className="px-5 pb-4 flex flex-wrap items-center gap-2">
-                                                                {item.allStatuses && item.allStatuses.map(statusBadge => (
-                                                                    <span key={statusBadge} className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border shadow-sm ${getStatusStyle(statusBadge).replace('bg-', 'bg-opacity-10 border-').replace('text-', 'text-')}`}>
-                                                                        <div className={`w-1.5 h-1.5 rounded-full mr-2 ${statusBadge === 'Active' ? 'animate-pulse bg-current' : 'bg-current'}`}></div>
-                                                                        {statusBadge}
-                                                                    </span>
-                                                                ))}
-                                                                {item.allStatuses && item.allStatuses.includes('Late') && item.lateReason && (
-                                                                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium truncate max-w-[120px]" title={item.lateReason}>
-                                                                        — {item.lateReason}
-                                                                    </span>
-                                                                )}
-                                                            </div>
-
-                                                            {/* Divider */}
-                                                            <div className="h-px bg-slate-100 dark:bg-github-dark-subtle mx-5"></div>
-
-                                                            {/* Card Body - Latest Session Only */}
-                                                            <div className="p-5 flex-1 overflow-hidden">
-                                                                {item.status === 'Absent' ? (
-                                                                    <div className="h-full flex flex-col items-center justify-center text-slate-400 py-4 italic">
-                                                                        <Clock size={20} className="mb-2 opacity-30" />
-                                                                        <span className="text-xs">No activity yet</span>
-                                                                    </div>
-                                                                ) : item.sessions.length > 0 ? (
-                                                                    <div className="relative pl-4 border-l-2 border-indigo-500">
-                                                                        {/* Session Indicator Dot */}
-                                                                        <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-md border-2 border-white dark:border-dark-card shadow-sm ${item.sessions[0].isActive ? 'bg-indigo-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-600'}`}></div>
-
-                                                                        <div className="flex items-center justify-between mb-2">
-                                                                            <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-widest">
-                                                                                Latest Session
-                                                                            </span>
-                                                                            {item.sessions[0].isActive && (
-                                                                                <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[9px] font-bold uppercase animate-pulse">
-                                                                                    Active
-                                                                                </span>
-                                                                            )}
-                                                                        </div>
-
-                                                                        <div className="grid grid-cols-2 gap-4">
-                                                                            <div className="space-y-1">
-                                                                                <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase">
-                                                                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                                                                                    In {item.sessions[0].in}
-                                                                                </div>
-                                                                                <div className="flex items-start gap-1 text-[9px] text-slate-500 dark:text-github-dark-muted bg-slate-50 dark:bg-github-dark-subtle/50 p-1.5 rounded-lg border border-slate-100 dark:border-github-dark-border">
-                                                                                    <MapPin size={10} className="shrink-0 mt-0.5 text-indigo-400" />
-                                                                                    <span className="line-clamp-2" title={item.sessions[0].inLocation}>{item.sessions[0].inLocation}</span>
-                                                                                </div>
-                                                                            </div>
-
-                                                                            <div className="space-y-1">
-                                                                                <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase">
-                                                                                    <div className={`w-1.5 h-1.5 rounded-full ${item.sessions[0].isActive ? 'bg-slate-300 dark:bg-slate-600' : 'bg-red-500'}`}></div>
-                                                                                    Out {item.sessions[0].out}
-                                                                                </div>
-                                                                                {item.sessions[0].outLocation ? (
-                                                                                    <div className="flex items-start gap-1 text-[9px] text-slate-500 dark:text-github-dark-muted bg-slate-50 dark:bg-github-dark-subtle/50 p-1.5 rounded-lg border border-slate-100 dark:border-github-dark-border">
-                                                                                        <MapPin size={10} className="shrink-0 mt-0.5 text-rose-400" />
-                                                                                        <span className="line-clamp-2" title={item.sessions[0].outLocation}>{item.sessions[0].outLocation}</span>
-                                                                                    </div>
-                                                                                ) : item.sessions[0].isActive ? (
-                                                                                    <div className="h-full flex items-center p-1.5">
-                                                                                        <span className="text-[10px] text-slate-300 dark:text-slate-600 italic">Ongoing...</span>
-                                                                                    </div>
-                                                                                ) : (
-                                                                                    <div className="h-full flex items-center p-1.5">
-                                                                                        <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">System Checkout</span>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        </div>
-
-                                                                        {/* More Sessions Indicator */}
-                                                                        {item.sessions.length > 1 && (
-                                                                            <div className="mt-3 text-center">
-                                                                                <span className="text-[10px] text-indigo-500 font-bold bg-indigo-50 dark:bg-indigo-900/30 px-2 py-1 rounded-full cursor-pointer hover:bg-indigo-100 transition-colors">
-                                                                                    +{item.sessions.length - 1} more sessions
-                                                                                </span>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-
-                                                            {/* Card Footer (Duration) */}
-                                                            {item.status !== 'Absent' && (
-                                                                <div className="bg-slate-50 dark:bg-github-dark-subtle/50 px-5 py-3 border-t border-slate-100 dark:border-github-dark-border flex items-center justify-between">
-                                                                    <div className="flex flex-col">
-                                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Daily Time</span>
-                                                                        <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
-                                                                            {item.totalHours}
-                                                                        </span>
-                                                                    </div>
-                                                                    {item.sessions.length > 1 && (
-                                                                        <div className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-slate-700 rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm">
-                                                                            <Activity size={12} className="text-indigo-500" />
-                                                                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{item.sessions.length} Sessions</span>
-                                                                        </div>
-                                                                    )}
+                                                    return (
+                                                        <React.Fragment key={item.id}>
+                                                            {showDivider && (
+                                                                <div className="col-span-full py-6 flex items-center gap-4">
+                                                                    <div className="h-px bg-slate-200 dark:bg-slate-700 flex-1"></div>
+                                                                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Not Checked In</span>
+                                                                    <div className="h-px bg-slate-200 dark:bg-slate-700 flex-1"></div>
                                                                 </div>
                                                             )}
-                                                        </div>
-                                                    </React.Fragment>
-                                                );
-                                            })
-                                        ) : (
-                                            <div className="col-span-full flex flex-col items-center justify-center py-20 text-slate-400">
-                                                <div className="bg-slate-100 dark:bg-github-dark-subtle p-4 rounded-full mb-4">
-                                                    <Search size={32} />
-                                                </div>
-                                                <p className="text-lg font-medium text-slate-600 dark:text-slate-300">No employees found</p>
-                                                <p className="text-sm">Try adjusting your filters or search terms</p>
-                                            </div>
-                                        )}
-                                    </div>
-                                ) : activeView === 'map' ? (
-                                    /* Map View Layout */
-                                    <div className="h-[650px] bg-white dark:bg-dark-card rounded-xl border border-slate-200 dark:border-github-dark-border shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-500 relative">
-                                        <MapContainer
-                                            center={[20, 78]}
-                                            zoom={5}
-                                            className="h-full w-full z-0"
-                                            attributionControl={false}
-                                        >
-                                            <TileLayer url={MAP_THEMES[activeTheme].url} />
-                                            
-                                            {/* Map Theme Switcher Overlay */}
-                                            <div className="absolute top-4 right-4 z-[1001]">
-                                                <div className="relative">
-                                                    <button
-                                                        onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
-                                                        className="flex items-center gap-2 bg-white dark:bg-github-dark-subtle text-slate-800 dark:text-github-dark-text px-4 py-2.5 rounded-xl shadow-lg border border-slate-200 dark:border-github-dark-border hover:border-indigo-500/50 transition-all group"
-                                                    >
-                                                        <Layers size={18} className="text-indigo-500 group-hover:scale-110 transition-transform" />
-                                                        <span className="text-sm font-semibold">{MAP_THEMES[activeTheme].name}</span>
-                                                        <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 ${isThemeMenuOpen ? 'rotate-180' : ''}`} />
-                                                    </button>
-
-                                                    {isThemeMenuOpen && (
-                                                        <>
-                                                            <div className="fixed inset-0 z-10" onClick={() => setIsThemeMenuOpen(false)} />
-                                                            <div className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200 z-20">
-                                                                <div className="py-1">
-                                                                    {Object.entries(MAP_THEMES).map(([id, theme]) => (
-                                                                        <button
-                                                                            key={id}
-                                                                            onClick={() => {
-                                                                                setActiveTheme(id);
-                                                                                setIsThemeMenuOpen(false);
-                                                                            }}
-                                                                            className={`w-full flex items-center justify-between px-4 py-3 text-sm transition-colors ${activeTheme === id
-                                                                                ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 font-bold'
-                                                                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-                                                                                }`}
-                                                                        >
-                                                                            <span>{theme.name}</span>
-                                                                            {activeTheme === id && <Check size={14} className="text-indigo-500" />}
-                                                                        </button>
-                                                                    ))}
+                                                            <div
+                                                                onClick={() => setSelectedLiveUser(item)}
+                                                                className={`bg-white dark:bg-dark-card rounded-lg border border-slate-200 dark:border-github-dark-border hover:shadow-md transition-all duration-300 overflow-hidden group flex flex-col cursor-pointer ${item.status === 'Absent' ? 'opacity-70 grayscale-[0.3]' : ''}`}
+                                                            >
+                                                                {/* Card Header */}
+                                                                <div className="p-5 flex items-start justify-between">
+                                                                    <div className="flex gap-4">
+                                                                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center font-bold text-lg shadow-sm overflow-hidden ${item.status === 'Absent' ? 'bg-slate-100 text-slate-400 dark:bg-github-dark-subtle dark:text-github-dark-muted' : 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white'}`}>
+                                                                            {item.avatar.startsWith('http') ? (
+                                                                                <img src={`${item.avatar}?t=${avatarTimestamp}`} alt={item.name} className="w-full h-full object-cover" />
+                                                                            ) : (
+                                                                                item.avatar
+                                                                            )}
+                                                                        </div>
+                                                                        <div>
+                                                                            <h3 className="font-bold text-slate-800 dark:text-github-dark-text line-clamp-1" title={item.name}>{item.name}</h3>
+                                                                            <p className="text-xs text-slate-500 dark:text-github-dark-muted font-medium">{item.role}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <button className="text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                                                                        <MoreVertical size={18} />
+                                                                    </button>
                                                                 </div>
+
+                                                                {/* Status Badge Line */}
+                                                                <div className="px-5 pb-4 flex flex-wrap items-center gap-2">
+                                                                    {item.allStatuses && item.allStatuses.map(statusBadge => (
+                                                                        <span key={statusBadge} className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border shadow-sm ${getStatusStyle(statusBadge).replace('bg-', 'bg-opacity-10 border-').replace('text-', 'text-')}`}>
+                                                                            <div className={`w-1.5 h-1.5 rounded-full mr-2 ${statusBadge === 'Active' ? 'animate-pulse bg-current' : 'bg-current'}`}></div>
+                                                                            {statusBadge}
+                                                                        </span>
+                                                                    ))}
+                                                                    {item.allStatuses && item.allStatuses.includes('Late') && item.lateReason && (
+                                                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium truncate max-w-[120px]" title={item.lateReason}>
+                                                                            — {item.lateReason}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+
+                                                                {/* Divider */}
+                                                                <div className="h-px bg-slate-100 dark:bg-github-dark-subtle mx-5"></div>
+
+                                                                {/* Card Body - Latest Session Only */}
+                                                                <div className="p-5 flex-1 overflow-hidden">
+                                                                    {item.status === 'Absent' ? (
+                                                                        <div className="h-full flex flex-col items-center justify-center text-slate-400 py-4 italic">
+                                                                            <Clock size={20} className="mb-2 opacity-30" />
+                                                                            <span className="text-xs">No activity yet</span>
+                                                                        </div>
+                                                                    ) : item.sessions.length > 0 ? (
+                                                                        <div className="relative pl-4 border-l-2 border-indigo-500">
+                                                                            {/* Session Indicator Dot */}
+                                                                            <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-md border-2 border-white dark:border-dark-card shadow-sm ${item.sessions[0].isActive ? 'bg-indigo-500 animate-pulse' : 'bg-slate-300 dark:bg-slate-600'}`}></div>
+
+                                                                            <div className="flex items-center justify-between mb-2">
+                                                                                <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-widest">
+                                                                                    Latest Session
+                                                                                </span>
+                                                                                {item.sessions[0].isActive && (
+                                                                                    <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[9px] font-bold uppercase animate-pulse">
+                                                                                        Active
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+
+                                                                            <div className="grid grid-cols-2 gap-4">
+                                                                                <div className="space-y-1">
+                                                                                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase">
+                                                                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                                                                                        In {item.sessions[0].in}
+                                                                                    </div>
+                                                                                    <div className="flex items-start gap-1 text-[9px] text-slate-500 dark:text-github-dark-muted bg-slate-50 dark:bg-github-dark-subtle/50 p-1.5 rounded-lg border border-slate-100 dark:border-github-dark-border">
+                                                                                        <MapPin size={10} className="shrink-0 mt-0.5 text-indigo-400" />
+                                                                                        <span className="line-clamp-2" title={item.sessions[0].inLocation}>{item.sessions[0].inLocation}</span>
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                <div className="space-y-1">
+                                                                                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase">
+                                                                                        <div className={`w-1.5 h-1.5 rounded-full ${item.sessions[0].isActive ? 'bg-slate-300 dark:bg-slate-600' : 'bg-red-500'}`}></div>
+                                                                                        Out {item.sessions[0].out}
+                                                                                    </div>
+                                                                                    {item.sessions[0].outLocation ? (
+                                                                                        <div className="flex items-start gap-1 text-[9px] text-slate-500 dark:text-github-dark-muted bg-slate-50 dark:bg-github-dark-subtle/50 p-1.5 rounded-lg border border-slate-100 dark:border-github-dark-border">
+                                                                                            <MapPin size={10} className="shrink-0 mt-0.5 text-rose-400" />
+                                                                                            <span className="line-clamp-2" title={item.sessions[0].outLocation}>{item.sessions[0].outLocation}</span>
+                                                                                        </div>
+                                                                                    ) : item.sessions[0].isActive ? (
+                                                                                        <div className="h-full flex items-center p-1.5">
+                                                                                            <span className="text-[10px] text-slate-300 dark:text-slate-600 italic">Ongoing...</span>
+                                                                                        </div>
+                                                                                    ) : (
+                                                                                        <div className="h-full flex items-center p-1.5">
+                                                                                            <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">System Checkout</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {/* More Sessions Indicator */}
+                                                                            {item.sessions.length > 1 && (
+                                                                                <div className="mt-3 text-center">
+                                                                                    <span className="text-[10px] text-indigo-500 font-bold bg-indigo-50 dark:bg-indigo-900/30 px-2 py-1 rounded-full cursor-pointer hover:bg-indigo-100 transition-colors">
+                                                                                        +{item.sessions.length - 1} more sessions
+                                                                                    </span>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    ) : null}
+                                                                </div>
+
+                                                                {/* Card Footer (Duration) */}
+                                                                {item.status !== 'Absent' && (
+                                                                    <div className="bg-slate-50 dark:bg-github-dark-subtle/50 px-5 py-3 border-t border-slate-100 dark:border-github-dark-border flex items-center justify-between">
+                                                                        <div className="flex flex-col">
+                                                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Daily Time</span>
+                                                                            <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                                                                                {item.totalHours}
+                                                                                {item.expectedHours && item.expectedHours !== '-' && (
+                                                                                    <span className="text-xs text-slate-400 dark:text-github-dark-muted font-normal">
+                                                                                        (Expected: {item.expectedHours})
+                                                                                    </span>
+                                                                                )}
+                                                                            </span>
+                                                                        </div>
+                                                                        {item.sessions.length > 1 && (
+                                                                            <div className="flex items-center gap-1.5 px-2 py-1 bg-white dark:bg-slate-700 rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm">
+                                                                                <Activity size={12} className="text-indigo-500" />
+                                                                                <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{item.sessions.length} Sessions</span>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
                                                             </div>
-                                                        </>
-                                                    )}
+                                                        </React.Fragment>
+                                                    );
+                                                })
+                                            ) : (
+                                                <div className="col-span-full flex flex-col items-center justify-center py-20 text-slate-400">
+                                                    <div className="bg-slate-100 dark:bg-github-dark-subtle p-4 rounded-full mb-4">
+                                                        <Search size={32} />
+                                                    </div>
+                                                    <p className="text-lg font-medium text-slate-600 dark:text-slate-300">No employees found</p>
+                                                    <p className="text-sm">Try adjusting your filters or search terms</p>
                                                 </div>
-                                            </div>
+                                            )}
+                                        </div>
+                                    ) : activeView === 'map' ? (
+                                        /* Map View Layout */
+                                        <div className="h-[650px] bg-white dark:bg-dark-card rounded-xl border border-slate-200 dark:border-github-dark-border shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-500 relative">
+                                            <MapContainer
+                                                center={[20, 78]}
+                                                zoom={5}
+                                                className="h-full w-full z-0"
+                                                attributionControl={false}
+                                            >
+                                                <TileLayer url={MAP_THEMES[activeTheme].url} />
 
-                                            <MapRecenter data={filteredData} searchTerm={searchTerm} departmentFilter={departmentFilter} />
+                                                {/* Map Theme Switcher Overlay */}
+                                                <div className="absolute top-4 right-4 z-[1001]">
+                                                    <div className="relative">
+                                                        <button
+                                                            onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
+                                                            className="flex items-center gap-2 bg-white dark:bg-github-dark-subtle text-slate-800 dark:text-github-dark-text px-4 py-2.5 rounded-xl shadow-lg border border-slate-200 dark:border-github-dark-border hover:border-indigo-500/50 transition-all group"
+                                                        >
+                                                            <Layers size={18} className="text-indigo-500 group-hover:scale-110 transition-transform" />
+                                                            <span className="text-sm font-semibold">{MAP_THEMES[activeTheme].name}</span>
+                                                            <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 ${isThemeMenuOpen ? 'rotate-180' : ''}`} />
+                                                        </button>
 
-                                            {(() => {
-                                                const areCoordsSame = (lat1, lng1, lat2, lng2) => {
-                                                    if (!lat1 || !lng1 || !lat2 || !lng2) return false;
-                                                    return Math.abs(Number(lat1) - Number(lat2)) < 0.0001 && 
-                                                           Math.abs(Number(lng1) - Number(lng2)) < 0.0001;
-                                                };
+                                                        {isThemeMenuOpen && (
+                                                            <>
+                                                                <div className="fixed inset-0 z-10" onClick={() => setIsThemeMenuOpen(false)} />
+                                                                <div className="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200 z-20">
+                                                                    <div className="py-1">
+                                                                        {Object.entries(MAP_THEMES).map(([id, theme]) => (
+                                                                            <button
+                                                                                key={id}
+                                                                                onClick={() => {
+                                                                                    setActiveTheme(id);
+                                                                                    setIsThemeMenuOpen(false);
+                                                                                }}
+                                                                                className={`w-full flex items-center justify-between px-4 py-3 text-sm transition-colors ${activeTheme === id
+                                                                                    ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 font-bold'
+                                                                                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                                                                    }`}
+                                                                            >
+                                                                                <span>{theme.name}</span>
+                                                                                {activeTheme === id && <Check size={14} className="text-indigo-500" />}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
 
-                                                const createClusterCustomIcon = function (cluster) {
-                                                    const count = cluster.getChildCount();
-                                                    return L.divIcon({
-                                                        className: 'cluster-marker',
-                                                        html: `<div class="cluster-marker-inner">
+                                                <MapRecenter data={filteredData} searchTerm={searchTerm} departmentFilter={departmentFilter} />
+
+                                                {(() => {
+                                                    const areCoordsSame = (lat1, lng1, lat2, lng2) => {
+                                                        if (!lat1 || !lng1 || !lat2 || !lng2) return false;
+                                                        return Math.abs(Number(lat1) - Number(lat2)) < 0.0001 &&
+                                                            Math.abs(Number(lng1) - Number(lng2)) < 0.0001;
+                                                    };
+
+                                                    const createClusterCustomIcon = function (cluster) {
+                                                        const count = cluster.getChildCount();
+                                                        return L.divIcon({
+                                                            className: 'cluster-marker',
+                                                            html: `<div class="cluster-marker-inner">
                                                                 <span>${count}</span>
                                                                 <div class="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white dark:border-dark-card flex items-center justify-center shadow-sm">
                                                                     <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                                                                 </div>
                                                                </div>`,
-                                                        iconSize: [44, 44],
-                                                        iconAnchor: [22, 22]
-                                                    });
-                                                };
+                                                            iconSize: [44, 44],
+                                                            iconAnchor: [22, 22]
+                                                        });
+                                                    };
 
-                                                return (
-                                                    <>
-                                                        <ClusterEvents setSelectedCluster={setSelectedCluster} />
-                                                        
-                                                        {selectedCluster && (
-                                                            <Popup 
-                                                                position={selectedCluster.position} 
-                                                                onClose={() => setSelectedCluster(null)}
-                                                                className="premium-popup cluster-drill-down"
+                                                    return (
+                                                        <>
+                                                            <ClusterEvents setSelectedCluster={setSelectedCluster} />
+
+                                                            {selectedCluster && (
+                                                                <Popup
+                                                                    position={selectedCluster.position}
+                                                                    onClose={() => setSelectedCluster(null)}
+                                                                    className="premium-popup cluster-drill-down"
+                                                                >
+                                                                    <ClusterDrillDownPopup data={selectedCluster.data} onClose={() => setSelectedCluster(null)} />
+                                                                </Popup>
+                                                            )}
+
+                                                            <MarkerClusterGroup
+                                                                chunkedLoading
+                                                                iconCreateFunction={createClusterCustomIcon}
+                                                                maxClusterRadius={40}
+                                                                spiderfyOnMaxZoom={true}
+                                                                showCoverageOnHover={false}
+                                                                zoomToBoundsOnClick={false}
                                                             >
-                                                                <ClusterDrillDownPopup data={selectedCluster.data} onClose={() => setSelectedCluster(null)} />
-                                                            </Popup>
-                                                        )}
+                                                                {filteredData.flatMap(user => {
+                                                                    return user.sessions.flatMap((session, sIdx) => {
+                                                                        const isCombined = areCoordsSame(session.inLat, session.inLng, session.outLat, session.outLng);
 
-                                                        <MarkerClusterGroup
-                                                            chunkedLoading
-                                                            iconCreateFunction={createClusterCustomIcon}
-                                                            maxClusterRadius={40}
-                                                            spiderfyOnMaxZoom={true}
-                                                            showCoverageOnHover={false}
-                                                            zoomToBoundsOnClick={false}
-                                                        >
-                                                            {filteredData.flatMap(user => {
-                                                            return user.sessions.flatMap((session, sIdx) => {
-                                                                const isCombined = areCoordsSame(session.inLat, session.inLng, session.outLat, session.outLng);
-                                                                
-                                                                const markersToRender = [];
-                                                                
-                                                                if (isCombined) {
-                                                                    markersToRender.push({ lat: session.inLat, lng: session.inLng, type: 'combined' });
-                                                                } else {
-                                                                    if (session.inLat && session.inLng) markersToRender.push({ lat: session.inLat, lng: session.inLng, type: 'in' });
-                                                                    if (session.outLat && session.outLng) markersToRender.push({ lat: session.outLat, lng: session.outLng, type: 'out' });
-                                                                }
+                                                                        const markersToRender = [];
 
-                                                                return markersToRender.map(m => {
-                                                                    const markerKey = `${user.id}-${sIdx}-${m.type}`;
-                                                                    const { type, lat, lng } = m;
+                                                                        if (isCombined) {
+                                                                            markersToRender.push({ lat: session.inLat, lng: session.inLng, type: 'combined' });
+                                                                        } else {
+                                                                            if (session.inLat && session.inLng) markersToRender.push({ lat: session.inLat, lng: session.inLng, type: 'in' });
+                                                                            if (session.outLat && session.outLng) markersToRender.push({ lat: session.outLat, lng: session.outLng, type: 'out' });
+                                                                        }
 
-                                                                    return (
-                                                                        <Marker
-                                                                            key={markerKey}
-                                                                            position={[Number(lat), Number(lng)]}
-                                                                            customSessionData={{ user, session, type }}
-                                                                            eventHandlers={{
-                                                                                click: () => setLockedMarkerId(markerKey),
-                                                                                popupclose: () => { if (lockedMarkerId === markerKey) setLockedMarkerId(null); }
-                                                                            }}
-                                                                            icon={L.divIcon({
-                                                                                className: `user-marker-${type}`,
-                                                                                html: `<div class="marker-inner relative ${lockedMarkerId === markerKey ? 'locked' : ''}">
+                                                                        return markersToRender.map(m => {
+                                                                            const markerKey = `${user.id}-${sIdx}-${m.type}`;
+                                                                            const { type, lat, lng } = m;
+
+                                                                            return (
+                                                                                <Marker
+                                                                                    key={markerKey}
+                                                                                    position={[Number(lat), Number(lng)]}
+                                                                                    customSessionData={{ user, session, type }}
+                                                                                    eventHandlers={{
+                                                                                        click: () => setLockedMarkerId(markerKey),
+                                                                                        popupclose: () => { if (lockedMarkerId === markerKey) setLockedMarkerId(null); }
+                                                                                    }}
+                                                                                    icon={L.divIcon({
+                                                                                        className: `user-marker-${type}`,
+                                                                                        html: `<div class="marker-inner relative ${lockedMarkerId === markerKey ? 'locked' : ''}">
                                                                                         <div class="w-10 h-10 rounded-full border-2 ${type === 'in' ? 'border-emerald-500' : type === 'out' ? 'border-rose-500' : 'border-transparent'} bg-white dark:bg-github-dark-subtle shadow-lg overflow-hidden flex items-center justify-center" ${type === 'combined' ? 'style="border-image: linear-gradient(to bottom right, #10b981 50%, #f43f5e 50%) 1;"' : ''}>
                                                                                             ${type === 'combined' ? `
                                                                                                 <div class="absolute inset-0 border-2 border-emerald-500 rounded-full" style="clip-path: polygon(0 0, 100% 0, 0 100%);"></div>
                                                                                                 <div class="absolute inset-0 border-2 border-rose-500 rounded-full" style="clip-path: polygon(100% 0, 100% 100%, 0 100%);"></div>
                                                                                             ` : ''}
-                                                                                            ${user.avatar.startsWith('http') 
-                                                                                                ? `<img src="${user.avatar}" class="w-full h-full object-cover" />` 
+                                                                                            ${user.avatar.startsWith('http')
+                                                                                                ? `<img src="${user.avatar}" class="w-full h-full object-cover" />`
                                                                                                 : `<span class="text-xs font-black text-slate-600 dark:text-slate-300">${user.avatar}</span>`
                                                                                             }
                                                                                         </div>
                                                                                         <div class="absolute -bottom-1 -right-1 w-4 h-4 ${type === 'in' ? 'bg-emerald-500' : type === 'out' ? 'bg-rose-500' : 'bg-indigo-600'} rounded-full border-2 border-white dark:border-dark-card flex items-center justify-center shadow-sm">
-                                                                                            ${type === 'in' ? '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>' : 
-                                                                                              type === 'out' ? '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' :
-                                                                                              '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'}
+                                                                                            ${type === 'in' ? '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>' :
+                                                                                                type === 'out' ? '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' :
+                                                                                                    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'}
                                                                                         </div>
                                                                                        </div>`,
-                                                                                iconSize: [40, 40],
-                                                                                iconAnchor: [20, 20]
-                                                                            })}
-                                                                        >
-                                                                            {lockedMarkerId !== markerKey && (
-                                                                                <MapTooltip direction="auto" offset={[0, -10]} opacity={1} className="premium-tooltip" sticky={true}>
-                                                                                    <div className={`bg-white dark:bg-[#0d1117] rounded-xl shadow-2xl border border-slate-200 dark:border-github-dark-border overflow-hidden ${type === 'combined' ? 'w-[320px]' : 'w-[280px]'} animate-in fade-in zoom-in-95 duration-200`}>
-                                                                                        <div className="p-2.5 border-b border-slate-100 dark:border-github-dark-border bg-slate-50/50 dark:bg-github-dark-subtle/20">
-                                                                                            <div className="flex items-center gap-2.5">
-                                                                                                <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-bold text-xs overflow-hidden shrink-0">
-                                                                                                    {user.avatar.startsWith('http') ? <img src={user.avatar} className="w-full h-full object-cover" /> : user.avatar}
+                                                                                        iconSize: [40, 40],
+                                                                                        iconAnchor: [20, 20]
+                                                                                    })}
+                                                                                >
+                                                                                    {lockedMarkerId !== markerKey && (
+                                                                                        <MapTooltip direction="auto" offset={[0, -10]} opacity={1} className="premium-tooltip" sticky={true}>
+                                                                                            <div className={`bg-white dark:bg-[#0d1117] rounded-xl shadow-2xl border border-slate-200 dark:border-github-dark-border overflow-hidden ${type === 'combined' ? 'w-[320px]' : 'w-[280px]'} animate-in fade-in zoom-in-95 duration-200`}>
+                                                                                                <div className="p-2.5 border-b border-slate-100 dark:border-github-dark-border bg-slate-50/50 dark:bg-github-dark-subtle/20">
+                                                                                                    <div className="flex items-center gap-2.5">
+                                                                                                        <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-bold text-xs overflow-hidden shrink-0">
+                                                                                                            {user.avatar.startsWith('http') ? <img src={user.avatar} className="w-full h-full object-cover" /> : user.avatar}
+                                                                                                        </div>
+                                                                                                        <div className="min-w-0">
+                                                                                                            <p className="font-bold text-slate-800 dark:text-github-dark-text text-xs leading-tight">{user.name}</p>
+                                                                                                            <p className="text-[9px] text-slate-500 font-medium">{type === 'combined' ? 'Full Session Details' : user.role}</p>
+                                                                                                        </div>
+                                                                                                    </div>
                                                                                                 </div>
-                                                                                                <div className="min-w-0">
-                                                                                                    <p className="font-bold text-slate-800 dark:text-github-dark-text text-xs leading-tight">{user.name}</p>
-                                                                                                    <p className="text-[9px] text-slate-500 font-medium">{type === 'combined' ? 'Full Session Details' : user.role}</p>
+                                                                                                <div className="p-2.5 space-y-2.5">
+                                                                                                    {type === 'combined' ? (
+                                                                                                        <>
+                                                                                                            <div className="space-y-2">
+                                                                                                                <div className="flex items-center justify-between">
+                                                                                                                    <div className="flex items-center gap-1.5">
+                                                                                                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                                                                                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Time In</span>
+                                                                                                                    </div>
+                                                                                                                    <span className="text-[10px] font-bold text-emerald-600 px-2 py-0.5 rounded-full">{session.in}</span>
+                                                                                                                </div>
+                                                                                                                {session.inImage && (
+                                                                                                                    <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-20 bg-slate-100 dark:bg-github-dark-subtle">
+                                                                                                                        <img src={session.inImage} className="w-full h-full object-cover" />
+                                                                                                                    </div>
+                                                                                                                )}
+                                                                                                            </div>
+                                                                                                            <div className="border-t border-slate-100 dark:border-github-dark-border pt-3 space-y-2">
+                                                                                                                <div className="flex items-center justify-between">
+                                                                                                                    <div className="flex items-center gap-1.5">
+                                                                                                                        <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
+                                                                                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Time Out</span>
+                                                                                                                    </div>
+                                                                                                                    <span className="text-[10px] font-bold text-rose-600 px-2 py-0.5 rounded-full">{session.out}</span>
+                                                                                                                </div>
+                                                                                                                {session.outImage && (
+                                                                                                                    <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-20 bg-slate-100 dark:bg-github-dark-subtle">
+                                                                                                                        <img src={session.outImage} className="w-full h-full object-cover" />
+                                                                                                                    </div>
+                                                                                                                )}
+                                                                                                            </div>
+                                                                                                        </>
+                                                                                                    ) : (
+                                                                                                        <>
+                                                                                                            <div className="flex items-center justify-between">
+                                                                                                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{type === 'in' ? 'Login' : 'Logout'}</span>
+                                                                                                                <span className={`text-[10px] font-bold ${type === 'in' ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'text-rose-600 bg-rose-50 dark:bg-rose-900/20'} px-2 py-0.5 rounded-full uppercase`}>{type === 'in' ? session.in : session.out}</span>
+                                                                                                            </div>
+                                                                                                            {(type === 'in' ? session.inImage : session.outImage) && (
+                                                                                                                <div className="relative group/img rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-24 bg-slate-100 dark:bg-github-dark-subtle">
+                                                                                                                    <img src={type === 'in' ? session.inImage : session.outImage} className="w-full h-full object-cover" />
+                                                                                                                </div>
+                                                                                                            )}
+                                                                                                        </>
+                                                                                                    )}
+                                                                                                    <div className="flex flex-col gap-0.5 p-2 bg-slate-50 dark:bg-github-dark-subtle/50 rounded-lg border border-slate-100 dark:border-github-dark-border">
+                                                                                                        <div className="flex items-center gap-1.5 text-[8px] font-bold text-slate-400 uppercase">
+                                                                                                            <MapPin size={8} className="text-indigo-500" /> Location
+                                                                                                        </div>
+                                                                                                        <p className="text-[9px] text-slate-600 dark:text-slate-300 leading-tight break-words whitespace-normal">{type === 'out' ? session.outLocation : session.inLocation}</p>
+                                                                                                    </div>
                                                                                                 </div>
                                                                                             </div>
-                                                                                        </div>
-                                                                                        <div className="p-2.5 space-y-2.5">
-                                                                                            {type === 'combined' ? (
-                                                                                                <>
-                                                                                                    <div className="space-y-2">
-                                                                                                        <div className="flex items-center justify-between">
-                                                                                                            <div className="flex items-center gap-1.5">
-                                                                                                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                                                                                                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Time In</span>
-                                                                                                            </div>
-                                                                                                            <span className="text-[10px] font-bold text-emerald-600 px-2 py-0.5 rounded-full">{session.in}</span>
-                                                                                                        </div>
-                                                                                                        {session.inImage && (
-                                                                                                            <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-20 bg-slate-100 dark:bg-github-dark-subtle">
-                                                                                                                <img src={session.inImage} className="w-full h-full object-cover" />
-                                                                                                            </div>
-                                                                                                        )}
+                                                                                        </MapTooltip>
+                                                                                    )}
+                                                                                    <Popup className="premium-popup">
+                                                                                        <div className={`bg-white dark:bg-[#0d1117] rounded-xl overflow-hidden ${type === 'combined' ? 'w-[320px]' : 'w-[280px]'}`}>
+                                                                                            <div className="p-2.5 border-b border-slate-100 dark:border-github-dark-border bg-slate-50/50 dark:bg-github-dark-subtle/20">
+                                                                                                <div className="flex items-center gap-2.5">
+                                                                                                    <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-bold text-xs overflow-hidden shrink-0">
+                                                                                                        {user.avatar.startsWith('http') ? <img src={user.avatar} className="w-full h-full object-cover" /> : user.avatar}
                                                                                                     </div>
-                                                                                                    <div className="border-t border-slate-100 dark:border-github-dark-border pt-3 space-y-2">
-                                                                                                        <div className="flex items-center justify-between">
-                                                                                                            <div className="flex items-center gap-1.5">
-                                                                                                                <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
-                                                                                                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Time Out</span>
+                                                                                                    <div className="min-w-0">
+                                                                                                        <p className="font-bold text-slate-800 dark:text-github-dark-text text-xs leading-tight">{user.name}</p>
+                                                                                                        <p className="text-[9px] text-slate-500 font-medium">{type === 'combined' ? 'Full Session Details' : user.role}</p>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="p-2.5 space-y-2.5">
+                                                                                                {type === 'combined' ? (
+                                                                                                    <>
+                                                                                                        <div className="space-y-2">
+                                                                                                            <div className="flex items-center justify-between">
+                                                                                                                <div className="flex items-center gap-1.5">
+                                                                                                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                                                                                                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Time In</span>
+                                                                                                                </div>
+                                                                                                                <span className="text-[10px] font-bold text-emerald-600 px-2 py-0.5 rounded-full">{session.in}</span>
                                                                                                             </div>
-                                                                                                            <span className="text-[10px] font-bold text-rose-600 px-2 py-0.5 rounded-full">{session.out}</span>
+                                                                                                            {session.inImage && (
+                                                                                                                <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-20 bg-slate-100 dark:bg-github-dark-subtle">
+                                                                                                                    <img src={session.inImage} className="w-full h-full object-cover" />
+                                                                                                                </div>
+                                                                                                            )}
                                                                                                         </div>
-                                                                                                        {session.outImage && (
-                                                                                                            <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-20 bg-slate-100 dark:bg-github-dark-subtle">
+                                                                                                        <div className="border-t border-slate-100 dark:border-github-dark-border pt-3 space-y-2">
+                                                                                                            <div className="flex items-center justify-between">
+                                                                                                                <div className="flex items-center gap-1.5">
+                                                                                                                    <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
+                                                                                                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Time Out</span>
+                                                                                                                </div>
+                                                                                                                <span className="text-[10px] font-bold text-rose-600 px-2 py-0.5 rounded-full">{session.out}</span>
+                                                                                                            </div>
+                                                                                                            {session.outImage && (
+                                                                                                                <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-20 bg-slate-100 dark:bg-github-dark-subtle">
                                                                                                                 <img src={session.outImage} className="w-full h-full object-cover" />
+                                                                                                                </div>
+                                                                                                            )}
+                                                                                                        </div>
+                                                                                                    </>
+                                                                                                ) : (
+                                                                                                    <>
+                                                                                                        <div className="flex items-center justify-between">
+                                                                                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{type === 'in' ? 'Login' : 'Logout'}</span>
+                                                                                                            <span className={`text-[10px] font-bold ${type === 'in' ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'text-rose-600 bg-rose-50 dark:bg-rose-900/20'} px-2 py-0.5 rounded-full uppercase`}>{type === 'in' ? session.in : session.out}</span>
+                                                                                                        </div>
+                                                                                                        {(type === 'in' ? session.inImage : session.outImage) && (
+                                                                                                            <div className="relative group/img rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-24 bg-slate-100 dark:bg-github-dark-subtle">
+                                                                                                                <img src={type === 'in' ? session.inImage : session.outImage} className="w-full h-full object-cover" />
                                                                                                             </div>
                                                                                                         )}
-                                                                                                    </div>
-                                                                                                </>
-                                                                                            ) : (
-                                                                                                <>
-                                                                                                    <div className="flex items-center justify-between">
-                                                                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{type === 'in' ? 'Login' : 'Logout'}</span>
-                                                                                                        <span className={`text-[10px] font-bold ${type === 'in' ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'text-rose-600 bg-rose-50 dark:bg-rose-900/20'} px-2 py-0.5 rounded-full uppercase`}>{type === 'in' ? session.in : session.out}</span>
-                                                                                                    </div>
-                                                                                                    {(type === 'in' ? session.inImage : session.outImage) && (
-                                                                                                        <div className="relative group/img rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-24 bg-slate-100 dark:bg-github-dark-subtle">
-                                                                                                            <img src={type === 'in' ? session.inImage : session.outImage} className="w-full h-full object-cover" />
-                                                                                                        </div>
-                                                                                                    )}
-                                                                                                </>
-                                                                                            )}
-                                                                                            <div className="flex flex-col gap-0.5 p-2 bg-slate-50 dark:bg-github-dark-subtle/50 rounded-lg border border-slate-100 dark:border-github-dark-border">
-                                                                                                <div className="flex items-center gap-1.5 text-[8px] font-bold text-slate-400 uppercase">
-                                                                                                    <MapPin size={8} className="text-indigo-500" /> Location
-                                                                                                </div>
-                                                                                                <p className="text-[9px] text-slate-600 dark:text-slate-300 leading-tight break-words whitespace-normal">{type === 'out' ? session.outLocation : session.inLocation}</p>
-                                                                                            </div>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                </MapTooltip>
-                                                                            )}
-                                                                            <Popup className="premium-popup">
-                                                                                <div className={`bg-white dark:bg-[#0d1117] rounded-xl overflow-hidden ${type === 'combined' ? 'w-[320px]' : 'w-[280px]'}`}>
-                                                                                    <div className="p-2.5 border-b border-slate-100 dark:border-github-dark-border bg-slate-50/50 dark:bg-github-dark-subtle/20">
-                                                                                        <div className="flex items-center gap-2.5">
-                                                                                            <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-bold text-xs overflow-hidden shrink-0">
-                                                                                                {user.avatar.startsWith('http') ? <img src={user.avatar} className="w-full h-full object-cover" /> : user.avatar}
-                                                                                            </div>
-                                                                                            <div className="min-w-0">
-                                                                                                <p className="font-bold text-slate-800 dark:text-github-dark-text text-xs leading-tight">{user.name}</p>
-                                                                                                <p className="text-[9px] text-slate-500 font-medium">{type === 'combined' ? 'Full Session Details' : user.role}</p>
-                                                                                            </div>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                    <div className="p-2.5 space-y-2.5">
-                                                                                        {type === 'combined' ? (
-                                                                                            <>
-                                                                                                <div className="space-y-2">
-                                                                                                    <div className="flex items-center justify-between">
-                                                                                                        <div className="flex items-center gap-1.5">
-                                                                                                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                                                                                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Time In</span>
-                                                                                                        </div>
-                                                                                                        <span className="text-[10px] font-bold text-emerald-600 px-2 py-0.5 rounded-full">{session.in}</span>
-                                                                                                    </div>
-                                                                                                    {session.inImage && (
-                                                                                                        <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-20 bg-slate-100 dark:bg-github-dark-subtle">
-                                                                                                            <img src={session.inImage} className="w-full h-full object-cover" />
-                                                                                                        </div>
-                                                                                                    )}
-                                                                                                </div>
-                                                                                                <div className="border-t border-slate-100 dark:border-github-dark-border pt-3 space-y-2">
-                                                                                                    <div className="flex items-center justify-between">
-                                                                                                        <div className="flex items-center gap-1.5">
-                                                                                                            <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
-                                                                                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Time Out</span>
-                                                                                                        </div>
-                                                                                                        <span className="text-[10px] font-bold text-rose-600 px-2 py-0.5 rounded-full">{session.out}</span>
-                                                                                                    </div>
-                                                                                                    {session.outImage && (
-                                                                                                        <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-20 bg-slate-100 dark:bg-github-dark-subtle">
-                                                                                                            <img src={session.outImage} className="w-full h-full object-cover" />
-                                                                                                        </div>
-                                                                                                    )}
-                                                                                                </div>
-                                                                                            </>
-                                                                                        ) : (
-                                                                                            <>
-                                                                                                <div className="flex items-center justify-between">
-                                                                                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{type === 'in' ? 'Login' : 'Logout'}</span>
-                                                                                                    <span className={`text-[10px] font-bold ${type === 'in' ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'text-rose-600 bg-rose-50 dark:bg-rose-900/20'} px-2 py-0.5 rounded-full uppercase`}>{type === 'in' ? session.in : session.out}</span>
-                                                                                                </div>
-                                                                                                {(type === 'in' ? session.inImage : session.outImage) && (
-                                                                                                    <div className="relative group/img rounded-lg overflow-hidden border border-slate-200 dark:border-github-dark-border h-24 bg-slate-100 dark:bg-github-dark-subtle">
-                                                                                                        <img src={type === 'in' ? session.inImage : session.outImage} className="w-full h-full object-cover" />
-                                                                                                    </div>
+                                                                                                    </>
                                                                                                 )}
-                                                                                            </>
-                                                                                        )}
-                                                                                        <div className="flex flex-col gap-0.5 p-2 bg-slate-50 dark:bg-github-dark-subtle/50 rounded-lg border border-slate-100 dark:border-github-dark-border">
-                                                                                            <div className="flex items-center gap-1.5 text-[8px] font-bold text-slate-400 uppercase">
-                                                                                                <MapPin size={8} className="text-indigo-500" /> Location
+                                                                                                <div className="flex flex-col gap-0.5 p-2 bg-slate-50 dark:bg-github-dark-subtle/50 rounded-lg border border-slate-100 dark:border-github-dark-border">
+                                                                                                    <div className="flex items-center gap-1.5 text-[8px] font-bold text-slate-400 uppercase">
+                                                                                                        <MapPin size={8} className="text-indigo-500" /> Location
+                                                                                                    </div>
+                                                                                                    <p className="text-[9px] text-slate-600 dark:text-slate-300 leading-tight break-words whitespace-normal">{type === 'out' ? session.outLocation : session.inLocation}</p>
+                                                                                                </div>
                                                                                             </div>
-                                                                                            <p className="text-[9px] text-slate-600 dark:text-slate-300 leading-tight break-words whitespace-normal">{type === 'out' ? session.outLocation : session.inLocation}</p>
                                                                                         </div>
-                                                                                    </div>
-                                                                                </div>
-                                                                            </Popup>
-                                                                        </Marker>
-                                                                    );
-                                                                });
-                                                            });
-                                                        })}
-                                                    </MarkerClusterGroup>
-                                                </>
-                                            );
-                                        })()}
-                                        </MapContainer>
-                                    </div>
-                                ) : activeView === 'graph' ? (
-                                    /* Graph View Layout */
-                                    <div className="space-y-6 animate-in fade-in duration-500">
-                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                            {/* Status Distribution */}
-                                            <div className="bg-white dark:bg-dark-card p-6 rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm hover:shadow-md transition-all">
-                                                <div className="flex items-center justify-between mb-6">
-                                                    <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text">Attendance Status</h3>
-                                                    <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 rounded-md">
-                                                        <PieChartIcon size={20} />
-                                                    </div>
-                                                </div>
-                                                <div className="h-[300px] w-full">
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <PieChart>
-                                                            <Pie
-                                                                data={getStatusData()}
-                                                                cx="50%"
-                                                                cy="50%"
-                                                                innerRadius={70}
-                                                                outerRadius={100}
-                                                                paddingAngle={8}
-                                                                dataKey="value"
-                                                                stroke="none"
-                                                            >
-                                                                {getStatusData().map((entry, index) => (
-                                                                    <Cell key={`cell-${index}`} fill={entry.color} className="hover:opacity-80 transition-opacity cursor-pointer" />
-                                                                ))}
-                                                            </Pie>
-                                                            <Tooltip
-                                                                contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.9)', backdropFilter: 'blur(8px)', borderColor: 'rgba(51, 65, 85, 0.5)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                                                                itemStyle={{ color: '#fff', fontWeight: 'bold' }}
-                                                            />
-                                                            <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                                                        </PieChart>
-                                                    </ResponsiveContainer>
-                                                </div>
-                                            </div>
-
-                                            {/* Department Breakdown */}
-                                            <div className="bg-white dark:bg-dark-card p-6 rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm hover:shadow-md transition-all">
-                                                <div className="flex items-center justify-between mb-6">
-                                                    <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text">Department Metrics</h3>
-                                                    <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 rounded-lg">
-                                                        <BarChartIcon size={20} />
-                                                    </div>
-                                                </div>
-                                                <div className="h-[300px] w-full">
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <BarChart data={getDepartmentData()}>
-                                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" opacity={0.3} />
-                                                            <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                                                            <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                                                            <Tooltip
-                                                                cursor={{ fill: 'rgba(99, 102, 241, 0.05)' }}
-                                                                contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.9)', backdropFilter: 'blur(8px)', borderColor: 'rgba(51, 65, 85, 0.5)', borderRadius: '12px', color: '#fff' }}
-                                                            />
-                                                            <Legend iconType="circle" />
-                                                            <Bar dataKey="Present" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
-                                                            <Bar dataKey="Late" stackId="a" fill="#f59e0b" />
-                                                            <Bar dataKey="Absent" stackId="a" fill="#ef4444" radius={[6, 6, 0, 0]} />
-                                                        </BarChart>
-                                                    </ResponsiveContainer>
-                                                </div>
-                                            </div>
+                                                                                    </Popup>
+                                                                                </Marker>
+                                                                            );
+                                                                        });
+                                                                    });
+                                                                })}
+                                                            </MarkerClusterGroup>
+                                                        </>
+                                                    );
+                                                })()}
+                                            </MapContainer>
                                         </div>
-
-                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                            {/* Check-in Activity */}
-                                            <div className="bg-white dark:bg-dark-card p-6 rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm hover:shadow-md transition-all">
-                                                <div className="flex items-center justify-between mb-6">
-                                                    <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text">Staff Activity Timeline</h3>
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-github-dark-subtle/50 rounded-lg border border-slate-100 dark:border-github-dark-border">
-                                                            <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-                                                            <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase">Login</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-github-dark-subtle/50 rounded-lg border border-slate-100 dark:border-github-dark-border">
-                                                            <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                                                            <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase">Active</span>
+                                    ) : activeView === 'graph' ? (
+                                        /* Graph View Layout */
+                                        <div className="space-y-6 animate-in fade-in duration-500">
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                                {/* Status Distribution */}
+                                                <div className="bg-white dark:bg-dark-card p-6 rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm hover:shadow-md transition-all">
+                                                    <div className="flex items-center justify-between mb-6">
+                                                        <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text">Attendance Status</h3>
+                                                        <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 rounded-md">
+                                                            <PieChartIcon size={20} />
                                                         </div>
                                                     </div>
+                                                    <div className="h-[300px] w-full">
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <PieChart>
+                                                                <Pie
+                                                                    data={getStatusData()}
+                                                                    cx="50%"
+                                                                    cy="50%"
+                                                                    innerRadius={70}
+                                                                    outerRadius={100}
+                                                                    paddingAngle={8}
+                                                                    dataKey="value"
+                                                                    stroke="none"
+                                                                >
+                                                                    {getStatusData().map((entry, index) => (
+                                                                        <Cell key={`cell-${index}`} fill={entry.color} className="hover:opacity-80 transition-opacity cursor-pointer" />
+                                                                    ))}
+                                                                </Pie>
+                                                                <Tooltip
+                                                                    contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.9)', backdropFilter: 'blur(8px)', borderColor: 'rgba(51, 65, 85, 0.5)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                                                                    itemStyle={{ color: '#fff', fontWeight: 'bold' }}
+                                                                />
+                                                                <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                                                            </PieChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
                                                 </div>
-                                                <div className="h-[300px] w-full">
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <AreaChart data={getTimelineData()}>
-                                                            <defs>
-                                                                <linearGradient id="colorActive" x1="0" y1="0" x2="0" y2="1">
-                                                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                                                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                                                </linearGradient>
-                                                                <linearGradient id="colorCheckins" x1="0" y1="0" x2="0" y2="1">
-                                                                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-                                                                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                                                                </linearGradient>
-                                                            </defs>
-                                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" opacity={0.3} />
-                                                            <XAxis dataKey="time" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} interval={1} />
-                                                            <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
-                                                            <Tooltip
-                                                                contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.9)', backdropFilter: 'blur(8px)', borderColor: 'rgba(51, 65, 85, 0.5)', borderRadius: '12px', color: '#fff' }}
-                                                            />
-                                                            <Area name="Active Staff" type="monotone" dataKey="active" stroke="#10b981" fillOpacity={1} fill="url(#colorActive)" strokeWidth={3} />
-                                                            <Area name="Staff Check-ins" type="monotone" dataKey="checkins" stroke="#6366f1" fillOpacity={1} fill="url(#colorCheckins)" strokeWidth={3} />
-                                                        </AreaChart>
-                                                    </ResponsiveContainer>
+
+                                                {/* Department Breakdown */}
+                                                <div className="bg-white dark:bg-dark-card p-6 rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm hover:shadow-md transition-all">
+                                                    <div className="flex items-center justify-between mb-6">
+                                                        <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text">Department Metrics</h3>
+                                                        <div className="p-2 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 rounded-lg">
+                                                            <BarChartIcon size={20} />
+                                                        </div>
+                                                    </div>
+                                                    <div className="h-[300px] w-full">
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <BarChart data={getDepartmentData()}>
+                                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" opacity={0.3} />
+                                                                <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                                                                <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
+                                                                <Tooltip
+                                                                    cursor={{ fill: 'rgba(99, 102, 241, 0.05)' }}
+                                                                    contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.9)', backdropFilter: 'blur(8px)', borderColor: 'rgba(51, 65, 85, 0.5)', borderRadius: '12px', color: '#fff' }}
+                                                                />
+                                                                <Legend iconType="circle" />
+                                                                <Bar dataKey="Present" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
+                                                                <Bar dataKey="Late" stackId="a" fill="#f59e0b" />
+                                                                <Bar dataKey="Absent" stackId="a" fill="#ef4444" radius={[6, 6, 0, 0]} />
+                                                            </BarChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
                                                 </div>
                                             </div>
 
-                                            {/* Login Frequency */}
-                                            <div className="bg-white dark:bg-dark-card p-6 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm hover:shadow-md transition-all">
-                                                <div className="flex items-center justify-between mb-6">
-                                                    <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text">Session Frequency</h3>
-                                                    <div className="p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-lg">
-                                                        <Activity size={20} />
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                                {/* Check-in Activity */}
+                                                <div className="bg-white dark:bg-dark-card p-6 rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm hover:shadow-md transition-all">
+                                                    <div className="flex items-center justify-between mb-6">
+                                                        <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text">Staff Activity Timeline</h3>
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-github-dark-subtle/50 rounded-lg border border-slate-100 dark:border-github-dark-border">
+                                                                <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
+                                                                <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase">Login</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-github-dark-subtle/50 rounded-lg border border-slate-100 dark:border-github-dark-border">
+                                                                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                                                                <span className="text-[10px] font-bold text-slate-500 dark:text-github-dark-muted uppercase">Active</span>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                                <div className="h-[300px] w-full">
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <BarChart data={getLoginFrequencyData()} layout="vertical" margin={{ left: 20 }}>
-                                                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" opacity={0.3} />
-                                                            <XAxis type="number" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
-                                                            <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} width={80} />
-                                                            <Tooltip
-                                                                cursor={{ fill: 'rgba(99, 102, 241, 0.05)' }}
-                                                                contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.9)', backdropFilter: 'blur(8px)', borderColor: 'rgba(51, 65, 85, 0.5)', borderRadius: '12px', color: '#fff' }}
-                                                            />
-                                                            <Bar dataKey="value" name="Employees" fill="#6366f1" radius={[0, 8, 8, 0]} barSize={24}>
-                                                                {getLoginFrequencyData().map((entry, index) => (
-                                                                    <Cell key={`cell-${index}`} fill={`url(#gradBar-${index})`} />
-                                                                ))}
-                                                            </Bar>
-                                                            <defs>
-                                                                {getLoginFrequencyData().map((_, i) => (
-                                                                    <linearGradient key={i} id={`gradBar-${i}`} x1="0" y1="0" x2="1" y2="0">
-                                                                        <stop offset="0%" stopColor="#6366f1" />
-                                                                        <stop offset="100%" stopColor="#a855f7" />
+                                                    <div className="h-[300px] w-full">
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <AreaChart data={getTimelineData()}>
+                                                                <defs>
+                                                                    <linearGradient id="colorActive" x1="0" y1="0" x2="0" y2="1">
+                                                                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                                                                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                                                                     </linearGradient>
-                                                                ))}
-                                                            </defs>
-                                                        </BarChart>
-                                                    </ResponsiveContainer>
+                                                                    <linearGradient id="colorCheckins" x1="0" y1="0" x2="0" y2="1">
+                                                                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
+                                                                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                                                                    </linearGradient>
+                                                                </defs>
+                                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" opacity={0.3} />
+                                                                <XAxis dataKey="time" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} interval={1} />
+                                                                <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
+                                                                <Tooltip
+                                                                    contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.9)', backdropFilter: 'blur(8px)', borderColor: 'rgba(51, 65, 85, 0.5)', borderRadius: '12px', color: '#fff' }}
+                                                                />
+                                                                <Area name="Active Staff" type="monotone" dataKey="active" stroke="#10b981" fillOpacity={1} fill="url(#colorActive)" strokeWidth={3} />
+                                                                <Area name="Staff Check-ins" type="monotone" dataKey="checkins" stroke="#6366f1" fillOpacity={1} fill="url(#colorCheckins)" strokeWidth={3} />
+                                                            </AreaChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
+                                                </div>
+
+                                                {/* Login Frequency */}
+                                                <div className="bg-white dark:bg-dark-card p-6 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm hover:shadow-md transition-all">
+                                                    <div className="flex items-center justify-between mb-6">
+                                                        <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text">Session Frequency</h3>
+                                                        <div className="p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-lg">
+                                                            <Activity size={20} />
+                                                        </div>
+                                                    </div>
+                                                    <div className="h-[300px] w-full">
+                                                        <ResponsiveContainer width="100%" height="100%">
+                                                            <BarChart data={getLoginFrequencyData()} layout="vertical" margin={{ left: 20 }}>
+                                                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" opacity={0.3} />
+                                                                <XAxis type="number" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
+                                                                <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} width={80} />
+                                                                <Tooltip
+                                                                    cursor={{ fill: 'rgba(99, 102, 241, 0.05)' }}
+                                                                    contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.9)', backdropFilter: 'blur(8px)', borderColor: 'rgba(51, 65, 85, 0.5)', borderRadius: '12px', color: '#fff' }}
+                                                                />
+                                                                <Bar dataKey="value" name="Employees" fill="#6366f1" radius={[0, 8, 8, 0]} barSize={24}>
+                                                                    {getLoginFrequencyData().map((entry, index) => (
+                                                                        <Cell key={`cell-${index}`} fill={`url(#gradBar-${index})`} />
+                                                                    ))}
+                                                                </Bar>
+                                                                <defs>
+                                                                    {getLoginFrequencyData().map((_, i) => (
+                                                                        <linearGradient key={i} id={`gradBar-${i}`} x1="0" y1="0" x2="1" y2="0">
+                                                                            <stop offset="0%" stopColor="#6366f1" />
+                                                                            <stop offset="100%" stopColor="#a855f7" />
+                                                                        </linearGradient>
+                                                                    ))}
+                                                                </defs>
+                                                            </BarChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ) : null}
+                                    ) : null}
+                                </div>
                             </div>
-                        </div>
-                    </>
-                ) : (
+                        </>
+                    ) : (
                     // Approvals Tab Content
                     <div className="flex flex-col lg:flex-row gap-6 items-start">
 
@@ -1804,18 +1793,18 @@ const AttendanceMonitoring = () => {
                                     <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full border border-indigo-100 dark:border-indigo-800">
                                         {requestCount} Pending
                                     </div>
-                                </div>
+                                    </div>
 
-                                <div className="relative">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                                    <input
-                                        type="text"
-                                        placeholder="Search by employee name..."
-                                        value={correctionSearchTerm}
-                                        onChange={(e) => setCorrectionSearchTerm(e.target.value)}
-                                        className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 dark:bg-github-dark-subtle/50 border border-slate-200 dark:border-github-dark-border rounded-md focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all"
-                                    />
-                                </div>
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                                        <input
+                                            type="text"
+                                            placeholder="Search by employee name..."
+                                            value={correctionSearchTerm}
+                                            onChange={(e) => setCorrectionSearchTerm(e.target.value)}
+                                            className="w-full pl-9 pr-4 py-2 text-xs bg-slate-50 dark:bg-github-dark-subtle/50 border border-slate-200 dark:border-github-dark-border rounded-md focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all"
+                                        />
+                                    </div>
 
                                 {/* Date Navigation */}
                                 { /* Date Navigation Removed */}
@@ -1852,6 +1841,9 @@ const AttendanceMonitoring = () => {
                                                         <p className={`text-xs font-bold leading-none ${selectedRequestId === request.acr_id ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-800 dark:text-github-dark-text'}`}>{request.user_name}</p>
                                                         <span className="text-[10px] text-slate-400 dark:text-github-dark-muted font-medium mt-1 inline-block">ID: {request.user_id}</span>
                                                     </div>
+                                                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${getRequestTypeStyle(request.correction_type)}`}>
+                                                        {(request.correction_type || '').replace('_', ' ')}
+                                                    </span>
                                                 </div>
                                                 <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
                                                     request.status === 'approved' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
@@ -1947,7 +1939,7 @@ const AttendanceMonitoring = () => {
                                                             setOverrideMethod(selectedRequestData.correction_method || 'fix');
                                                         }
                                                     }}
-                                                    className="w-4 h-4 text-indigo-650 rounded border-slate-350 dark:border-github-dark-border focus:ring-indigo-500"
+                                                    className="w-4 h-4 text-indigo-600 rounded border-slate-350 dark:border-github-dark-border focus:ring-indigo-500"
                                                 />
                                                 <label htmlFor="overrideToggle" className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-github-dark-text select-none cursor-pointer">
                                                     Override Request Details
@@ -2008,7 +2000,7 @@ const AttendanceMonitoring = () => {
                                                                     </div>
                                                                 ))}
                                                             </div>
-                                                            <button type="button" onClick={() => setOverrideSessions([...overrideSessions, { time_in: '', time_out: '' }])} className="text-sm font-semibold text-indigo-650 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1.5 px-1 pt-1 transition-colors">
+                                                            <button type="button" onClick={() => setOverrideSessions([...overrideSessions, { time_in: '', time_out: '' }])} className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-1.5 px-1 pt-1 transition-colors">
                                                                 <span className="text-lg leading-none">+</span> Add Session
                                                             </button>
                                                         </div>
@@ -2192,6 +2184,39 @@ const AttendanceMonitoring = () => {
                                                 </div>
                                             )}
 
+                                            {/* Audit Trail */}
+                                            {(() => {
+                                                const trail = typeof selectedRequestData.audit_trail === 'string'
+                                                    ? (() => { try { return JSON.parse(selectedRequestData.audit_trail); } catch { return []; } })()
+                                                    : (Array.isArray(selectedRequestData.audit_trail) ? selectedRequestData.audit_trail : []);
+                                                if (trail && trail.length > 0) {
+                                                    return (
+                                                        <div className="bg-slate-50 dark:bg-[#1a1c26] rounded-xl border border-slate-200 dark:border-github-dark-border p-4">
+                                                            <h4 className="text-xs uppercase tracking-wider text-slate-500 dark:text-github-dark-muted font-semibold mb-4 flex items-center gap-2">
+                                                                <Activity size={14} /> Audit Trail
+                                                            </h4>
+                                                            <div className="relative pl-4 border-l-2 border-slate-200 dark:border-github-dark-border space-y-6">
+                                                                {trail.map((event, idx) => (
+                                                                    <div key={idx} className="relative">
+                                                                        <div className="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-slate-300 dark:bg-slate-600 border-2 border-white dark:border-dark-card ring-1 ring-slate-100 dark:ring-slate-800"></div>
+                                                                        <p className="text-sm font-medium text-slate-800 dark:text-github-dark-text">
+                                                                            {String(event.action).charAt(0).toUpperCase() + String(event.action).slice(1)}
+                                                                        </p>
+                                                                        <p className="text-xs text-slate-500 dark:text-github-dark-muted">
+                                                                            {new Date(event.at).toLocaleString()} • by {event.by === selectedRequestData.user_id ? selectedRequestData.user_name : 'Admin'}
+                                                                        </p>
+                                                                        {event.comments && (
+                                                                            <p className="text-xs text-slate-600 dark:text-github-dark-muted mt-1 italic">"{event.comments}"</p>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
+
                                             {/* Request Reason */}
                                             <div className="bg-slate-50 dark:bg-[#1e202e] rounded-xl border border-slate-200 dark:border-github-dark-border p-4">
                                                 <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
@@ -2239,29 +2264,29 @@ const AttendanceMonitoring = () => {
 
                                         </div>
 
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                        <FileText size={48} className="mb-4 opacity-50" />
+                                        <p>Select a request to view details</p>
                                     </div>
-                                </>
-                            ) : (
-                                <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                                    <FileText size={48} className="mb-4 opacity-50" />
-                                    <p>Select a request to view details</p>
-                                </div>
-                            )}
+                                )}
+                            </div>
                         </div>
-                    </div>
-                )}
-
-                {/* --- Live Attendance Detail Sidebar --- */}
-                <AnimatePresence>
-                    {selectedLiveUser && (
-                        <UserAttendanceDetailsModal
-                            user={selectedLiveUser}
-                            onClose={() => setSelectedLiveUser(null)}
-                        />
                     )}
-                </AnimatePresence>
 
-            </div>
+                    {/* --- Live Attendance Detail Sidebar --- */}
+                    <AnimatePresence>
+                        {selectedLiveUser && (
+                            <UserAttendanceDetailsModal
+                                user={selectedLiveUser}
+                                onClose={() => setSelectedLiveUser(null)}
+                            />
+                        )}
+                    </AnimatePresence>
+
+                </div>
             </DashboardLayout>
         </>
     );
@@ -2330,6 +2355,7 @@ const UserAttendanceDetailsModal = ({ user, onClose }) => {
                             </span>
                             <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-github-dark-muted bg-slate-100 dark:bg-github-dark-subtle/50 px-2 py-0.5 rounded border border-slate-200 dark:border-github-dark-border">
                                 {user.totalHours && user.totalHours.toLowerCase().includes('hrs') ? user.totalHours : `${user.totalHours} Hrs`}
+                                {user.expectedHours && user.expectedHours !== '-' && ` / ${user.expectedHours}`}
                             </span>
                         </div>
                     </div>

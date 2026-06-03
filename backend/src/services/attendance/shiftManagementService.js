@@ -327,7 +327,7 @@ function getDefaultShiftConfig() {
         },
         overtime: {
             enabled: true,
-            threshold: 8,
+            threshold: 9,
             buffer: 0.5  // 30 minutes buffer after shift end before OT kicks in
         },
         entry_requirements: {
@@ -389,129 +389,5 @@ export function checkBiometricCompliance(file, requirements) {
     }
 
     return { ok: true };
-}
-
-/**
- * Calculate late arrival and grace period compliance
- * @param {string} localTime - Local time in ISO format
- * @param {Object} rules - Unified shift rules
- * @returns {Object} Late calculation result
- */
-export function calculateLateArrival(localTime, rules) {
-    let minutesLate = 0;
-    const timing = rules?.shift_timing || {};
-    const startTimeStr = timing.start_time;
-
-    if (startTimeStr) {
-        const localTimePart = localTime.split('T')[1]?.split('.')[0] || localTime;
-        
-        const [curH, curM] = localTimePart.split(':').map(Number);
-        const currentMinutes = curH * 60 + curM;
-        
-        const [shiftH, shiftM] = startTimeStr.split(':').map(Number);
-        const shiftMinutes = shiftH * 60 + shiftM;
-        
-        if (currentMinutes > shiftMinutes) {
-            minutesLate = currentMinutes - shiftMinutes;
-        }
-    }
-    
-    const gracePeriod = Number(rules?.grace_period?.minutes || 0);
-    const isLate = minutesLate > gracePeriod;
-
-    return {
-        minutesLate,
-        isLate,
-        gracePeriod,
-        shiftStartTime: startTimeStr
-    };
-}
-
-/**
- * Evaluate status based on shift rules and session context
- */
-export function evaluateStatus(rules, data) {
-    // 1. Overtime Check (Priority)
-    // Use total_hours_today if available, otherwise fallback to session total_hours
-    const rawTotal = data.total_hours_today ?? data.total_hours ?? 0;
-    const totalHours = Number(rawTotal) || 0;
-    
-    // Threshold defaults to 8 if missing, NaN, or 0
-    let threshold = Number(rules?.overtime?.threshold);
-    if (isNaN(threshold) || threshold <= 0) threshold = 8;
-
-    // Buffer: time after shift end before overtime triggers (default 30 min = 0.5 hr)
-    const buffer = Number(rules?.overtime?.buffer ?? 0.5);
-
-    if (rules?.overtime?.enabled !== false && totalHours >= (threshold + buffer)) {
-        return "OVERTIME";
-    }
-
-
-
-
-    // 2. Absent Check (Less than 4 hours total at checkout)
-    if (totalHours < 4 && data.event_type === "time_out") {
-        return "ABSENT";
-    }
-
-    // 3. Late Check
-    const graceMins = Number(rules.grace_period?.minutes || 0);
-    const minutesLate = Number(data.minutes_late || 0);
-
-    if (minutesLate > graceMins) {
-        return "LATE";
-    }
-
-    return "PRESENT";
-}
-
-/**
- * Build session context for a user's day
- * @param {number} user_id 
- * @param {string} localTime - Current local time
- * @param {string} eventType - "time_in" or "time_out"
- * @returns {Promise<Object>} Session context data
- */
-export async function buildSessionContext(user_id, localTime, eventType) {
-    // Sanitize time for SQL
-    const sanitizedLocalTime = localTime.replace('T', ' ').split('.')[0];
-    
-    const todaySessions = await attendanceDB("attendance_records")
-        .where({ user_id })
-        .whereRaw("DATE(time_in) = DATE(?)", [sanitizedLocalTime])
-        .orderBy("time_in", "asc");
-
-    const isFirstSession = todaySessions.length === 0;
-    const sessionNumber = todaySessions.length + 1;
-
-    // Calculate total hours worked today
-    let totalHoursToday = 0;
-    todaySessions.forEach(session => {
-        if (session.time_out) {
-            const duration = (new Date(session.time_out) - new Date(session.time_in)) / (1000 * 60 * 60);
-            totalHoursToday += duration;
-        }
-    });
-
-    const firstTimeIn = todaySessions[0]?.time_in;
-    const lastTimeOut = todaySessions[todaySessions.length - 1]?.time_out;
-
-    return {
-        is_first_session: isFirstSession,
-        session_number: sessionNumber,
-        total_sessions: todaySessions.length,
-        
-        // Time data
-        first_time_in: firstTimeIn,
-        last_time_out: lastTimeOut,
-        
-        // Aggregates
-        total_hours_today: parseFloat(totalHoursToday.toFixed(2)),
-        first_session_late_mins: todaySessions[0]?.late_minutes || 0,
-        
-        // Event context
-        event_type: eventType
-    };
 }
 

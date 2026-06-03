@@ -3,8 +3,7 @@ import { attendanceDB } from "../../config/database.js";
 import * as S3Service from "../s3/s3Service.js";
 import EventBus from "../../utils/EventBus.js";
 import * as ShiftService from "./shiftManagementService.js";
-
-// ========== HELPER FUNCTIONS ==========
+import * as StatusService from "./statusEvaluationService.js";
 
 /**
  * Fetch User Shift
@@ -53,7 +52,7 @@ export async function processTimeIn(context) {
   }
 
   // 2. Shift Context
-  const sessionContext = await ShiftService.buildSessionContext(user_id, localTime, "time_in");
+  const sessionContext = await StatusService.buildSessionContext(user_id, localTime, "time_in");
   const shift = await getUserShift(user_id);
   const rules = ShiftService.getShiftRules(shift);
 
@@ -75,7 +74,7 @@ export async function processTimeIn(context) {
   let lateCheck = { minutesLate: 0, isLate: false, gracePeriod: 0 };
 
   if (sessionContext.is_first_session) {
-    lateCheck = ShiftService.calculateLateArrival(localTime, rules);
+    lateCheck = StatusService.calculateLateArrival(localTime, rules);
   }
 
   const minutesLate = lateCheck.minutesLate;
@@ -166,6 +165,9 @@ export async function processTimeIn(context) {
     user_agent: user_agent
   });
 
+  // 5. Calculate Expected Hours
+  const expectedHours = ShiftService.getExpectedHours(localTime, rules.week_off_policy, rules);
+
   return {
     ok: true,
     attendance_id,
@@ -175,6 +177,7 @@ export async function processTimeIn(context) {
     image_key: imageKey,
     session_number: sessionContext.session_number,
     is_first_session: sessionContext.is_first_session,
+    working_hours: expectedHours,
     message: "Timed in successfully",
   };
 }
@@ -210,7 +213,7 @@ export async function processTimeOut(context) {
   }
 
   // 2. Shift Context
-  const sessionContext = await ShiftService.buildSessionContext(user_id, localTime, "time_out");
+  const sessionContext = await StatusService.buildSessionContext(user_id, localTime, "time_out");
   const shift = await getUserShift(user_id);
   const rules = ShiftService.getShiftRules(shift);
 
@@ -246,18 +249,15 @@ export async function processTimeOut(context) {
   }
 
   // Calculations
-  const timeIn = new Date(openSession.time_in);
-  const timeOut = new Date(localTime);
-  const durationMs = timeOut - timeIn;
-  const totalHours = parseFloat((durationMs / (1000 * 60 * 60)).toFixed(2));
+  const totalHours = StatusService.calculateDurationHours(openSession.time_in, localTime);
   const minutesLate = openSession.late_minutes || 0;
 
   // Status Evaluation (Re-fetch context to include the session we just calculated)
-  const currentSessionContext = await ShiftService.buildSessionContext(user_id, localTime, "time_out");
+  const currentSessionContext = await StatusService.buildSessionContext(user_id, localTime, "time_out");
   currentSessionContext.total_hours = totalHours; // Pass session duration to engine
   currentSessionContext.minutes_late = minutesLate; // Ensure lateness is available
   currentSessionContext.total_hours_today = parseFloat((currentSessionContext.total_hours_today + totalHours).toFixed(2)); // Update aggregate
-  const status = ShiftService.evaluateStatus(rules, currentSessionContext);
+  const status = StatusService.evaluateStatus(rules, currentSessionContext);
 
   // Metadata Update
   let metadata = {};
@@ -289,8 +289,7 @@ export async function processTimeOut(context) {
       time_out_lat: latitude,
       time_out_lng: longitude,
       time_out_address: address,
-      // Overtime requires OT tracking to be enabled AND exceeding threshold + buffer
-      overtime_hours: (rules.overtime?.enabled !== false && totalHours >= ((rules.overtime?.threshold || 8) + (rules.overtime?.buffer ?? 0.5))) ? parseFloat((totalHours - (rules.overtime?.threshold || 8)).toFixed(2)) : 0,
+      overtime_hours: StatusService.calculateOvertime(totalHours, rules),
       status: status,
       metadata: JSON.stringify(metadata),
       updated_at: attendanceDB.fn.now(),
@@ -328,6 +327,9 @@ export async function processTimeOut(context) {
     user_agent: user_agent
   });
 
+  // 5. Calculate Expected Hours
+  const expectedHours = ShiftService.getExpectedHours(localTime, rules.week_off_policy, rules);
+
   return {
     ok: true,
     attendance_id: openSession.attendance_id,
@@ -338,6 +340,7 @@ export async function processTimeOut(context) {
     status,
     session_hours: parseFloat(totalHours.toFixed(2)),
     total_hours_today: currentSessionContext.total_hours_today,
+    expected_hours: expectedHours,
     message: "Timed out successfully",
   };
 
@@ -383,47 +386,28 @@ export async function syncDailyAttendance(user_id, dateStr, overrides = {}) {
     }
 
     // 3. Calculate Hours
-    let totalMs = 0;
-    records.forEach(r => {
-      if (r.time_in && r.time_out) {
-        totalMs += (new Date(r.time_out) - new Date(r.time_in));
-      }
-    });
-    const totalHours = parseFloat((totalMs / (1000 * 60 * 60)).toFixed(2));
+    const totalHours = records.reduce((acc, r) => acc + StatusService.calculateDurationHours(r.time_in, r.time_out), 0);
 
     // 4. Get Rules for Overtime
     let overtimeHours = 0;
     try {
       const shift = await getUserShift(user_id);
       const rules = ShiftService.getShiftRules(shift);
-      const threshold = rules.overtime?.threshold || 8;
-      const buffer = Number(rules.overtime?.buffer ?? 0.5); // Configurable buffer from shift policy
-      const isEnabled = rules.overtime?.enabled !== false;
-      
-      if (isEnabled && totalHours >= (threshold + buffer)) {
-        overtimeHours = parseFloat((totalHours - threshold).toFixed(2));
-      }
+      overtimeHours = StatusService.calculateOvertime(totalHours, rules);
     } catch (e) {
       // Ignore missing shift/policy errors during sync
     }
 
-    const getTimeStr = (d) => {
-      if (!d) return null;
-      try {
-        const dateObj = new Date(d);
-        if (isNaN(dateObj.getTime())) return null;
-        const pad = (n) => String(n).padStart(2, '0');
-        return `${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}:${pad(dateObj.getSeconds())}`;
-      } catch (e) {
-        return null;
-      }
-    };
+
+    // 5. Determine Daily Status (if not provided in overrides)
+    const finalStatus = overrides.status || StatusService.deriveDailyStatus(records);
 
     const updateData = {
       first_in: getTimeStr(firstRec.time_in),
       last_out: getTimeStr(lastRec.time_out),
       total_hours: totalHours,
       overtime_hours: overtimeHours,
+      status: finalStatus,
       updated_at: attendanceDB.fn.now(),
       ...overrides
     };
@@ -822,44 +806,41 @@ export async function reviewCorrectionRequest({
     const localDate = new Date(d.getTime() - (offset * 60 * 1000));
     const finalDateStr = localDate.toISOString().split('T')[0];
 
+    // Fetch shift rules to calculate proper status
+    const shift = await getUserShift(correction.user_id);
+    const rules = ShiftService.getShiftRules(shift);
+
     // Delete all existing records for the day
     await attendanceDB("attendance_records")
       .where({ user_id: correction.user_id })
       .whereRaw("DATE(time_in) = ?", [finalDateStr])
       .del();
 
+    // Calculate aggregate totals and statuses using Service logic
+    const sortedSessions = [...sessionsToApply].sort((a, b) => a.time_in.localeCompare(b.time_in));
+    const evaluatedSessions = StatusService.evaluateSessionList(rules, sortedSessions, finalDateStr);
+
     // Insert the approved sessions
-    const newRecords = sessionsToApply.map(s => {
-      const tIn = typeof s.time_in === 'string' && s.time_in.length === 5 ? s.time_in + ':00' : s.time_in;
-      const tOut = typeof s.time_out === 'string' && s.time_out.length === 5 ? s.time_out + ':00' : s.time_out;
-      return {
-        user_id: correction.user_id,
-        org_id,
-        time_in: `${finalDateStr} ${tIn}`,
-        time_out: `${finalDateStr} ${tOut}`,
-        status: 'CLOSED',
-        created_at: attendanceDB.fn.now(),
-        updated_at: attendanceDB.fn.now(),
-        time_in_address: 'Manual Correction',
-        time_out_address: 'Manual Correction',
-        altered_by: reviewer_id
-      };
-    });
+    const newRecords = evaluatedSessions.map(s => ({
+      user_id: correction.user_id,
+      org_id,
+      time_in: s.time_in,
+      time_out: s.time_out,
+      status: s.status,
+      late_minutes: s.late_minutes,
+      created_at: attendanceDB.fn.now(),
+      updated_at: attendanceDB.fn.now(),
+      time_in_address: 'Manual Correction',
+      time_out_address: 'Manual Correction',
+      altered_by: reviewer_id
+    }));
 
     await attendanceDB("attendance_records").insert(newRecords);
 
-    // Sync Daily Summary
-    const manualBase = {
-      status: 'PRESENT',
-      is_manual_adjustment: true,
+    // Sync Daily Summary (Now uses the combined state of the sessions)
+    await syncDailyAttendance(correction.user_id, finalDateStr, {
       adjusted_by: reviewer_id,
       updated_at: attendanceDB.fn.now()
-    };
-
-    await syncDailyAttendance(correction.user_id, finalDateStr, {
-      ...manualBase,
-      is_altered: true,
-      adjustment_reason: `Correction Request #${acr_id}`
     });
   }
 }
@@ -918,3 +899,58 @@ export async function exportRecordsToExcel({ user_id, org_id, month, year, month
 
   return workbook;
 }
+
+/**
+ * Wrapper for daily summary status evaluation service with pre-signed S3 image URLs
+ */
+export async function getDailySummary({ org_id, user_id = null, date_from, date_to }) {
+  const summaries = await StatusService.getDailySummary({ org_id, user_id, date_from, date_to });
+
+  // Resolve pre-signed URLs for all records/sessions
+  for (const userSummary of summaries) {
+    for (const day of userSummary.days) {
+      if (day.sessions && day.sessions.length > 0) {
+        day.sessions = await Promise.all(
+          day.sessions.map(async (row) => {
+            let timeInUrl = null;
+            let timeOutUrl = null;
+
+            if (row.time_in_image_key) {
+              try {
+                const { url } = await S3Service.getFileUrl({ key: row.time_in_image_key });
+                timeInUrl = url;
+              } catch (e) {
+                console.error("Error signing S3 image time_in_image_key", e);
+              }
+            }
+            if (row.time_out_image_key) {
+              try {
+                const { url } = await S3Service.getFileUrl({ key: row.time_out_image_key });
+                timeOutUrl = url;
+              } catch (e) {
+                console.error("Error signing S3 image time_out_image_key", e);
+              }
+            }
+
+            return {
+              ...row,
+              time_in_image: timeInUrl,
+              time_out_image: timeOutUrl,
+            };
+          })
+        );
+      }
+    }
+  }
+
+  return summaries;
+}
+
+// ========== HELPER FUNCTIONS ==========
+const getTimeStr = (d) => {
+  if (!d) return null;
+  const dateObj = new Date(d);
+  if (isNaN(dateObj.getTime())) return null;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}:${pad(dateObj.getSeconds())}`;
+};

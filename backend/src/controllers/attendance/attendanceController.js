@@ -522,13 +522,17 @@ export async function getMyShift(req, res) {
   try {
     const { user_id } = req.user;
     const shift = await AttendanceService.getUserShift(user_id);
-    
+
     if (!shift) {
-      return res.status(404).json({ message: "No shift assigned to this user" });
+      return res.json({
+        ok: true,
+        shift: null,
+        message: "No shift assigned to this user"
+      });
     }
 
     const rules = ShiftManagementService.getShiftRules(shift);
-    
+
     res.json({
       ok: true,
       shift: {
@@ -544,3 +548,88 @@ export async function getMyShift(req, res) {
     res.status(500).json({ message: "Internal server error" });
   }
 }
+
+/**
+ * GET /attendance/daily-summary
+ * Get daily summary history with shift policies evaluated dynamically for the logged-in user.
+ */
+export const getUserDailySummary = catchAsync(async (req, res) => {
+  const userId = req.user.id || req.user.user_id;
+  const { org_id } = req.user;
+  const { date_from, date_to } = req.query;
+
+  if (!date_from || !date_to) {
+    return res.status(400).json({ ok: false, message: "date_from and date_to parameters are required." });
+  }
+
+  const summaries = await AttendanceService.getDailySummary({
+    org_id,
+    user_id: userId,
+    date_from,
+    date_to
+  });
+
+  const userSummary = summaries.find(s => s.user_id === userId) || { days: [] };
+
+  return res.json({
+    ok: true,
+    data: userSummary.days
+  });
+});
+
+/**
+ * GET /attendance/daily-summary/admin
+ * Admin dashboard endpoint to fetch dynamic daily summaries for all active staff on a given date.
+ */
+export const getAdminDailySummary = catchAsync(async (req, res) => {
+  const { org_id } = req.user;
+  const { date } = req.query;
+
+  if (!date) {
+    return res.status(400).json({ ok: false, message: "date parameter is required." });
+  }
+
+  const summaries = await AttendanceService.getDailySummary({
+    org_id,
+    date_from: date,
+    date_to: date
+  });
+
+  const staff = summaries.map(s => {
+    const dayData = s.days[0] || {
+      status: "ABSENT",
+      total_hours: 0,
+      first_in: null,
+      last_out: null,
+      late_minutes: 0,
+      late_reason: "",
+      overtime_hours: 0,
+      expected_hours: 0,
+      sessions: []
+    };
+
+    return {
+      user_id: s.user_id,
+      user_name: s.user_name,
+      desg_name: s.desg_name,
+      dept_name: s.dept_name,
+      profile_image_url: s.profile_image_url,
+      shift_id: s.shift_id,
+      status: dayData.status,
+      total_hours: dayData.total_hours,
+      first_in: dayData.first_in,
+      last_out: dayData.last_out,
+      late_minutes: dayData.late_minutes,
+      late_reason: dayData.late_reason,
+      overtime_hours: dayData.overtime_hours,
+      expected_hours: dayData.expected_hours,
+      sessions: dayData.sessions
+    };
+  });
+
+  return res.json({
+    ok: true,
+    data: staff
+  });
+});
+

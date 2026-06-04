@@ -46,6 +46,10 @@ We have successfully integrated the Firebase Cloud Messaging (FCM) and WebSocket
 * **File Modified**: [feedbackService.js](file:///c:/Users/madha/OneDrive/Desktop/Attendance-Web/backend/src/services/feedback/feedbackService.js)
 * **Change**: Integrated `EventBus.emitNotification` inside `submitFeedback` to automatically dispatch standard DB-saved, WebSockets, and FCM background push alerts to all active Admins in the submitting user's organization when feedback is received.
 
+### 8. Resolved Exposed Google API Key (GitHub Secret Alert)
+* **Files Modified**: [firebase-messaging-sw.js](file:///c:/Users/madha/OneDrive/Desktop/Attendance-Web/frontend/public/firebase-messaging-sw.js) and [fcm.js](file:///c:/Users/madha/OneDrive/Desktop/Attendance-Web/frontend/src/services/fcm.js)
+* **Change**: Removed the hardcoded sensitive Firebase API key and configuration credentials from the static service worker. Refactored `fcm.js` to pass active configurations dynamically as URL query parameters during Service Worker registration, and updated `firebase-messaging-sw.js` to parse these parameters at initialization time using `self.location.search`.
+
 ---
 
 ## 🧪 Validation & Verification

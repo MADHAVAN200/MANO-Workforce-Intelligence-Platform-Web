@@ -595,6 +595,19 @@ export const getAdminDailySummary = catchAsync(async (req, res) => {
     date_to: date
   });
 
+  let timezone = "UTC";
+  try {
+    const org = await attendanceDB("organizations")
+      .where("org_id", org_id)
+      .select("timezone")
+      .first();
+    if (org && org.timezone) {
+      timezone = org.timezone;
+    }
+  } catch (err) {
+    console.error("Failed to fetch organization timezone:", err);
+  }
+
   const staff = summaries.map(s => {
     const dayData = s.days[0] || {
       status: "ABSENT",
@@ -629,6 +642,7 @@ export const getAdminDailySummary = catchAsync(async (req, res) => {
 
   return res.json({
     ok: true,
+    timezone,
     data: staff
   });
 });

@@ -81,6 +81,7 @@ export const updateUser = catchAsync(async (req, res, next) => {
     };
 
     const io = req.app.get('io');
+    const profileImageBuffer = req.file ? req.file.buffer : null;
     const result = await userService.updateUser(user_id, req.body, authInfo, profileImageBuffer, io);
 
     res.json({ success: true, message: "User updated successfully", profile_image_url: result.profileImageUrl || null });

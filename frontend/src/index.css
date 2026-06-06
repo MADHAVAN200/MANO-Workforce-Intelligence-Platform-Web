@@ -345,3 +345,35 @@ html.platform-zoomed .space-y-8 > * + * {
     color: #60a5fa !important;
 }
 
+/* ===== Print Layout Styles for HR Document Studio ===== */
+@media print {
+  /* Hide standard screen container elements completely */
+  body * {
+    visibility: hidden;
+  }
+  /* Show only the targeted print element and its children */
+  .print-only, .print-only * {
+    visibility: visible;
+  }
+  /* Position target element at exact top left of A4 sheet page */
+  .print-only {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+    padding: 0;
+    background: white !important;
+    color: black !important;
+  }
+  
+  /* Suppress standard header/footers from print settings if possible */
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+}
+
+

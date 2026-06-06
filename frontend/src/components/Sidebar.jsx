@@ -18,7 +18,9 @@ import {
     Building,
     ShieldAlert,
     MessageSquare,
-    Code
+    Code,
+    Briefcase,
+    Award
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import FeedbackModal from './FeedbackModal';
@@ -65,6 +67,7 @@ const getNavItems = (userType) => {
         { icon: <ShieldAlert size={18} />, text: "Security Alerts", to: "/super-admin/alerts", roles: ['super_admin'] },
         { icon: <MessageSquare size={18} />, text: "User Feedback", to: "/super-admin/feedback", roles: ['super_admin'] },
         { icon: <Code size={18} />, text: "System Logs", to: "/super-admin/logs", roles: ['super_admin'] },
+        { icon: <ClipboardCheck size={18} />, text: "Employee Master", to: "/employee-master", roles: ['admin', 'hr'] },
         { icon: <Users size={18} />, text: "Employees", to: "/employees", roles: ['admin', 'hr'] },
         { icon: <Calendar size={18} />, text: "Attendance", to: "/attendance", roles: ['admin', 'hr', 'employee'] },
         { icon: <Clock size={18} />, text: "Live Attendance", to: "/attendance-monitoring", roles: ['admin', 'hr'] },
@@ -74,6 +77,7 @@ const getNavItems = (userType) => {
         {icon: <MapPin size={18} />, text: "Geo Fencing", to: "/geofencing", roles: ['admin', 'hr'] },
         { icon: <Settings size={18} />, text: "Shift Management", to: "/shift-management", roles: ['admin', 'hr'] },
         { icon: <Calendar size={18} />, text: "Holidays and Leave", to: "/holidays", roles: ['admin', 'hr', 'employee'] },
+        { icon: <Briefcase size={18} />, text: "Recruitment", to: "/recruitment", roles: ['admin', 'hr'] },
         // { icon: <CreditCard size={18} />, text: "Subscription", to: "/subscription", roles: ['admin'] },
     ];
 

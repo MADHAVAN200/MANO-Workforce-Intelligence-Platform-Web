@@ -36,6 +36,11 @@ import DailyActivity from "./pages/dar/DailyActivity"
 import DARAdmin from "./pages/dar/DARAdmin"
 import LeaveApplication from "./pages/holidays/LeaveApplication"
 import ChatPage from "./pages/collaboration/ChatPage";
+import RecruitmentDashboard from "./pages/recruitment/RecruitmentDashboard";
+import PublicJobOpening from "./pages/recruitment/PublicJobOpening";
+import EmployeeMaster from "./pages/employees/EmployeeMaster";
+import DocumentGenerator from "./pages/documents/DocumentGenerator";
+import Documentation from "./pages/documentation/Documentation";
 
 // Organization Pages Imports
 
@@ -267,6 +272,7 @@ function App() {
 
           {/* Website Landing (shown first when not logged in) */}
           <Route path="/" element={<RootHandler />} />
+          <Route path="/careers/:slug" element={<PublicJobOpening />} />
           <Route path="/get-started" element={<Navigate to="/login" replace />} />
 
           {/* Public Route: Login */}
@@ -294,6 +300,7 @@ function App() {
               <Route path="/daily-activity" element={<ResponsiveRoute DesktopComponent={DailyActivity} MobileComponent={DailyActivityMobile} />} />
               <Route path="/apply-leave" element={<ResponsiveRoute DesktopComponent={LeaveApplication} MobileComponent={MobileLeaveApplication} />} />
               <Route path="/collaboration" element={<ResponsiveRoute DesktopComponent={ChatPage} MobileComponent={MobileChatPage} />} />
+              <Route path="/documentation" element={<Documentation />} />
 
               {/* Mobile-Only Pages fallback */}
               <Route path="/notifications" element={<MobileNotifications />} />
@@ -306,12 +313,15 @@ function App() {
               <Route path="/reports" element={<ResponsiveRoute DesktopComponent={Reports} MobileComponent={MobileReports} />} />
               <Route path="/shift-management" element={<ResponsiveRoute DesktopComponent={ShiftManagement} MobileComponent={MobileShiftManagement} />} />
               <Route path="/geofencing" element={<ResponsiveRoute DesktopComponent={GeoFencing} MobileComponent={MobileGeoFencing} />} />
+              <Route path="/employee-master" element={<EmployeeMaster />} />
               <Route path="/employees" element={<ResponsiveRoute DesktopComponent={EmployeeList} MobileComponent={MobileEmployeeList} />} />
               <Route path="/employees/add" element={<ResponsiveRoute DesktopComponent={EmployeeForm} MobileComponent={MobileEmployeeForm} />} />
               <Route path="/employees/edit/:id" element={<ResponsiveRoute DesktopComponent={EmployeeForm} MobileComponent={MobileEmployeeForm} />} />
               <Route path="/employees/bulk" element={<ResponsiveRoute DesktopComponent={BulkUpload} MobileComponent={MobileBulkUpload} />} />
               <Route path="/holidays/bulk" element={<ResponsiveRoute DesktopComponent={BulkHolidayImport} MobileComponent={MobileBulkHolidayImport} />} />
               <Route path="/dar-admin" element={<DARAdmin />} />
+              <Route path="/recruitment" element={<RecruitmentDashboard />} />
+              <Route path="/documents" element={<DocumentGenerator />} />
             </Route>
 
             {/* Admin Only Routes */}

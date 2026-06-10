@@ -865,9 +865,41 @@ const Attendance = () => {
         return new Date(dateString).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });
     };
 
-    const formatTime = (isoString) => {
+    const formatTime = (isoString, sessionRecord = null, isOut = false) => {
         if (!isoString) return null;
-        return new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        
+        let tz = null;
+        if (sessionRecord?.metadata) {
+            try {
+                const meta = typeof sessionRecord.metadata === 'string' ? JSON.parse(sessionRecord.metadata) : sessionRecord.metadata;
+                tz = isOut ? meta?.time_out?.timezone : meta?.time_in?.timezone;
+            } catch (e) {}
+        }
+        
+        if (tz === 'N/A' || tz === 'Simulated Timezone' || !tz) {
+            tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        }
+
+        try {
+            const timeStr = new Date(isoString).toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true,
+                timeZone: tz
+            });
+            
+            const abbrFormatter = new Intl.DateTimeFormat('en-US', {
+                timeZone: tz,
+                timeZoneName: 'short'
+            });
+            const parts = abbrFormatter.formatToParts(new Date(isoString));
+            const tzPart = parts.find(p => p.type === 'timeZoneName');
+            const abbr = tzPart ? tzPart.value : '';
+            
+            return abbr ? `${timeStr} (${abbr})` : timeStr;
+        } catch (e) {
+            return new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        }
     };
 
     const calculateDuration = (timeIn, timeOut) => {
@@ -1072,7 +1104,7 @@ const Attendance = () => {
                         
                         <button
                             onClick={() => setActiveTab('mark_attendance')}
-                            className={`flex-1 py-4 text-sm font-bold rounded-xl transition-all duration-500 flex items-center justify-center gap-3 z-10 ${
+                            className={`flex-1 py-4 text-sm font-normal rounded-xl transition-all duration-500 flex items-center justify-center gap-3 z-10 ${
                                 activeTab === 'mark_attendance'
                                     ? 'bg-white text-indigo-600 shadow-[0_4px_15px_rgba(0,0,0,0.1)] transform scale-[1.01]'
                                     : 'text-slate-200 dark:text-slate-400 hover:bg-white/5'
@@ -1083,7 +1115,7 @@ const Attendance = () => {
                         </button>
                         <button
                             onClick={() => setActiveTab('my_attendance')}
-                            className={`flex-1 py-4 text-sm font-bold rounded-xl transition-all duration-500 flex items-center justify-center gap-3 z-10 ${
+                            className={`flex-1 py-4 text-sm font-normal rounded-xl transition-all duration-500 flex items-center justify-center gap-3 z-10 ${
                                 activeTab === 'my_attendance'
                                     ? 'bg-white text-indigo-600 shadow-[0_4px_15px_rgba(0,0,0,0.1)] transform scale-[1.01]'
                                     : 'text-slate-200 dark:text-slate-400 hover:bg-white/5'
@@ -1341,7 +1373,7 @@ const Attendance = () => {
                                                         <div className="min-w-0">
                                                             <span className="block text-[10px] font-black text-slate-400 dark:text-github-dark-muted tracking-widest mb-1 opacity-70">Time In</span>
                                                             <span className="text-2xl font-black text-slate-800 dark:text-white truncate block tracking-tight">
-                                                                {formatTime(session.time_in)}
+                                                                {formatTime(session.time_in, session, false)}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -1392,7 +1424,7 @@ const Attendance = () => {
                                                         <div className="min-w-0">
                                                             <span className="block text-[10px] font-black text-slate-400 dark:text-github-dark-muted tracking-widest mb-1 opacity-70">Time Out</span>
                                                             <span className={`text-2xl font-black truncate block tracking-tight ${session.time_out ? 'text-slate-800 dark:text-white' : 'text-emerald-500 animate-pulse'}`}>
-                                                                {session.time_out ? formatTime(session.time_out) : 'Active Session'}
+                                                                {session.time_out ? formatTime(session.time_out, session, true) : 'Active Session'}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -1501,7 +1533,7 @@ const Attendance = () => {
                         <div className="border-b border-slate-200 dark:border-github-dark-border flex gap-6">
                             <button
                                 onClick={() => setSubTab('history')}
-                                className={`pb-3 text-sm font-medium transition-all relative ${subTab === 'history'
+                                className={`pb-3 text-sm font-normal transition-all relative ${subTab === 'history'
                                     ? 'text-indigo-600 dark:text-indigo-400'
                                     : 'text-slate-500 hover:text-slate-700 dark:text-github-dark-muted'
                                     }`}
@@ -1516,7 +1548,7 @@ const Attendance = () => {
                             </button>
                             <button
                                 onClick={() => setSubTab('analytics')}
-                                className={`pb-3 text-sm font-medium transition-all relative ${subTab === 'analytics'
+                                className={`pb-3 text-sm font-normal transition-all relative ${subTab === 'analytics'
                                     ? 'text-indigo-600 dark:text-indigo-400'
                                     : 'text-slate-500 hover:text-slate-700 dark:text-github-dark-muted'
                                     }`}
@@ -1531,7 +1563,7 @@ const Attendance = () => {
                             </button>
                             <button
                                 onClick={() => setSubTab('correction')}
-                                className={`pb-3 text-sm font-medium transition-all relative ${subTab === 'correction'
+                                className={`pb-3 text-sm font-normal transition-all relative ${subTab === 'correction'
                                     ? 'text-indigo-600 dark:text-indigo-400'
                                     : 'text-slate-500 hover:text-slate-700 dark:text-github-dark-muted'
                                     }`}
@@ -1600,12 +1632,12 @@ const Attendance = () => {
                                                             <div className="flex items-center gap-6 text-sm">
                                                                 <div>
                                                                     <p className="text-xs text-slate-400 uppercase font-bold mb-1">In</p>
-                                                                    <p className="font-mono font-medium text-slate-700 dark:text-slate-300">{formatTime(session.time_in)}</p>
+                                                                    <p className="font-mono font-medium text-slate-700 dark:text-slate-300">{formatTime(session.time_in, session, false)}</p>
                                                                 </div>
                                                                 <div>
                                                                     <p className="text-xs text-slate-400 uppercase font-bold mb-1">Out</p>
                                                                     <p className="font-mono font-medium text-slate-700 dark:text-slate-300">
-                                                                        {session.time_out ? formatTime(session.time_out) : '--:--'}
+                                                                        {session.time_out ? formatTime(session.time_out, session, true) : '--:--'}
                                                                     </p>
                                                                 </div>
                                                                 <div className="text-right min-w-[60px]">

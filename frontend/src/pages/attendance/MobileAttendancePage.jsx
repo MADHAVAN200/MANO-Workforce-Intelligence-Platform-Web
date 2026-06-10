@@ -588,6 +588,43 @@ const MobileAttendancePage = () => {
         }
     };
 
+    const formatTime = (isoString, sessionRecord = null, isOut = false) => {
+        if (!isoString) return null;
+        
+        let tz = null;
+        if (sessionRecord?.metadata) {
+            try {
+                const meta = typeof sessionRecord.metadata === 'string' ? JSON.parse(sessionRecord.metadata) : sessionRecord.metadata;
+                tz = isOut ? meta?.time_out?.timezone : meta?.time_in?.timezone;
+            } catch (e) {}
+        }
+        
+        if (tz === 'N/A' || tz === 'Simulated Timezone' || !tz) {
+            tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        }
+
+        try {
+            const timeStr = new Date(isoString).toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true,
+                timeZone: tz
+            });
+            
+            const abbrFormatter = new Intl.DateTimeFormat('en-US', {
+                timeZone: tz,
+                timeZoneName: 'short'
+            });
+            const parts = abbrFormatter.formatToParts(new Date(isoString));
+            const tzPart = parts.find(p => p.type === 'timeZoneName');
+            const abbr = tzPart ? tzPart.value : '';
+            
+            return abbr ? `${timeStr} (${abbr})` : timeStr;
+        } catch (e) {
+            return new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        }
+    };
+
     const calculateHours = (inTime, outTime) => {
         if (!inTime || !outTime) return '0h 0m';
         const start = new Date(inTime);
@@ -725,7 +762,7 @@ const MobileAttendancePage = () => {
                     <div className="bg-slate-200/50 dark:bg-github-dark-border/50 p-1.5 flex rounded-2xl backdrop-blur-md border border-white/20 dark:border-white/5 shadow-xl">
                         <button
                             onClick={() => handleMainTabChange('attendance')}
-                            className={`flex-1 py-2.5 text-[11px] font-semibold rounded-xl transition-all flex items-center justify-center gap-2 ${
+                            className={`flex-1 py-2.5 text-[11px] font-normal rounded-xl transition-all flex items-center justify-center gap-2 ${
                                 mainTab === 'attendance'
                                     ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-md transform scale-[1.02]'
                                     : 'text-slate-500 dark:text-github-dark-muted hover:bg-white/50 dark:hover:bg-slate-800/50'
@@ -736,7 +773,7 @@ const MobileAttendancePage = () => {
                         </button>
                         <button
                             onClick={() => handleMainTabChange('my_attendance')}
-                            className={`flex-1 py-2.5 text-[11px] font-semibold rounded-xl transition-all flex items-center justify-center gap-2 ${
+                            className={`flex-1 py-2.5 text-[11px] font-normal rounded-xl transition-all flex items-center justify-center gap-2 ${
                                 mainTab === 'my_attendance'
                                     ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-md transform scale-[1.02]'
                                     : 'text-slate-500 dark:text-github-dark-muted hover:bg-white/50 dark:hover:bg-slate-800/50'
@@ -949,7 +986,7 @@ const MobileAttendancePage = () => {
                                                             </div>
                                                             <div className="min-w-0">
                                                                 <span className="block text-[9px] font-black text-slate-400 dark:text-github-dark-muted tracking-widest leading-none mb-1">Time In</span>
-                                                                <span className="text-sm font-black text-slate-800 dark:text-github-dark-text truncate block">{new Date(s.time_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                <span className="text-sm font-black text-slate-800 dark:text-github-dark-text truncate block">{formatTime(s.time_in, s, false)}</span>
                                                             </div>
                                                         </div>
                                                         {s.time_in_image ? (
@@ -978,7 +1015,7 @@ const MobileAttendancePage = () => {
                                                             </div>
                                                             <div className="min-w-0">
                                                                 <span className="block text-[9px] font-black text-slate-400 dark:text-github-dark-muted tracking-widest leading-none mb-1">Time Out</span>
-                                                                <span className="text-sm font-black text-slate-800 dark:text-github-dark-text truncate block">{s.time_out ? new Date(s.time_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---'}</span>
+                                                                <span className="text-sm font-black text-slate-800 dark:text-github-dark-text truncate block">{s.time_out ? formatTime(s.time_out, s, true) : '---'}</span>
                                                             </div>
                                                         </div>
                                                         {s.time_out_image ? (
@@ -1055,7 +1092,7 @@ const MobileAttendancePage = () => {
                                                 }`}
                                             >
                                                 <sub.icon size={16} className={isActive ? 'text-indigo-500' : 'text-slate-400'} />
-                                                <span className={`text-[11px] font-bold uppercase tracking-wider ${isActive ? 'opacity-100' : 'opacity-70'}`}>
+                                                <span className={`text-[11px] font-normal uppercase tracking-wider ${isActive ? 'opacity-100' : 'opacity-70'}`}>
                                                     {sub.label}
                                                 </span>
                                                 {isActive && (
@@ -1119,7 +1156,7 @@ const MobileAttendancePage = () => {
                                                     <div className="flex items-center justify-between bg-slate-50/50 dark:bg-github-dark-border/20 p-2 rounded-2xl">
                                                         <div>
                                                             <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">In</span>
-                                                            <span className="text-[11px] font-black text-slate-700 dark:text-github-dark-text">{new Date(s.time_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                            <span className="text-[11px] font-black text-slate-700 dark:text-github-dark-text">{formatTime(s.time_in, s, false)}</span>
                                                         </div>
                                                         {s.time_in_image && (
                                                             <button onClick={() => setPreviewImage(s.time_in_image)} className="w-8 h-8 rounded-lg border border-white dark:border-github-dark-border overflow-hidden active:scale-90 transition-all shadow-sm">
@@ -1130,7 +1167,7 @@ const MobileAttendancePage = () => {
                                                     <div className="flex items-center justify-between bg-slate-50/50 dark:bg-github-dark-border/20 p-2 rounded-2xl">
                                                         <div>
                                                             <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Out</span>
-                                                            <span className="text-[11px] font-black text-slate-700 dark:text-github-dark-text">{s.time_out ? new Date(s.time_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---'}</span>
+                                                            <span className="text-[11px] font-black text-slate-700 dark:text-github-dark-text">{s.time_out ? formatTime(s.time_out, s, true) : '---'}</span>
                                                         </div>
                                                         {s.time_out_image && (
                                                             <button onClick={() => setPreviewImage(s.time_out_image)} className="w-8 h-8 rounded-lg border border-white dark:border-github-dark-border overflow-hidden active:scale-90 transition-all shadow-sm">

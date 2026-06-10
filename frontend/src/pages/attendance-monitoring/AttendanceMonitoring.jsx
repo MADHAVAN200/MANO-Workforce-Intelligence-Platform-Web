@@ -251,19 +251,42 @@ const ClusterDrillDownPopup = ({ data, onClose }) => {
     );
 };
 
+// Timezone abbreviation helper
+const getTimezoneAbbreviation = (tzName) => {
+    if (!tzName || tzName === 'N/A' || tzName === 'Simulated Timezone') return '';
+    try {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: tzName,
+            timeZoneName: 'short'
+        });
+        const parts = formatter.formatToParts(new Date());
+        const tzPart = parts.find(p => p.type === 'timeZoneName');
+        return tzPart ? tzPart.value : tzName;
+    } catch (e) {
+        return tzName;
+    }
+};
+
 // Timezone-aware date/time parser and normalizer
 const parseTimeInTimezone = (r, isOut, orgTimezone) => {
     let utcStr = null;
     let fallbackStr = isOut ? r.time_out : r.time_in;
+    let recordTimezone = null;
 
     if (r.metadata) {
         try {
             const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata;
             utcStr = isOut ? meta?.time_out?.timestamp_utc : meta?.time_in?.timestamp_utc;
+            recordTimezone = isOut ? meta?.time_out?.timezone : meta?.time_in?.timezone;
+            if (recordTimezone === 'N/A' || recordTimezone === 'Simulated Timezone' || !recordTimezone) {
+                recordTimezone = null;
+            }
         } catch (e) {
             console.error("Failed to parse metadata", e);
         }
     }
+
+    const timezoneToUse = recordTimezone || orgTimezone || 'UTC';
 
     // If we have a valid UTC string from metadata, we convert it to the organization's timezone.
     if (utcStr) {
@@ -286,7 +309,7 @@ const parseTimeInTimezone = (r, isOut, orgTimezone) => {
                 }
 
                 if (utcStr) {
-                    const localStr = d.toLocaleString('en-US', { timeZone: orgTimezone || 'UTC' });
+                    const localStr = d.toLocaleString('en-US', { timeZone: timezoneToUse });
                     const parsed = new Date(localStr);
                     if (!isNaN(parsed.getTime())) return parsed;
                 }
@@ -432,18 +455,35 @@ const AttendanceMonitoring = () => {
                 let totalMin = 0;
                 const sessions = daySessions.map(r => {
                     const inTime = parseTimeInTimezone(r, false, resolvedTz);
-                    const formatTime = (d) => {
+                    const outTime = parseTimeInTimezone(r, true, resolvedTz);
+
+                    let inTz = null;
+                    let outTz = null;
+                    if (r.metadata) {
+                        try {
+                            const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata;
+                            inTz = meta?.time_in?.timezone;
+                            outTz = meta?.time_out?.timezone;
+                        } catch (e) {}
+                    }
+                    if (inTz === 'N/A' || inTz === 'Simulated Timezone' || !inTz) inTz = resolvedTz;
+                    if (outTz === 'N/A' || outTz === 'Simulated Timezone' || !outTz) outTz = resolvedTz;
+
+                    const inTzAbbr = getTimezoneAbbreviation(inTz);
+                    const outTzAbbr = getTimezoneAbbreviation(outTz);
+
+                    const formatTime = (d, tzAbbr) => {
                         if (!d) return '-';
-                        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        return tzAbbr ? `${timeStr} (${tzAbbr})` : timeStr;
                     };
 
-                    const inStr = formatTime(inTime);
+                    const inStr = formatTime(inTime, inTzAbbr);
                     let outStr = '-';
                     let isActive = !r.time_out && r.status !== 'MISSED_PUNCH';
 
-                    const outTime = parseTimeInTimezone(r, true, resolvedTz);
                     if (outTime) {
-                        outStr = formatTime(outTime);
+                        outStr = formatTime(outTime, outTzAbbr);
                         if (inTime) totalMin += Math.max(0, (outTime - inTime) / 60000);
                     } else if (isActive && inTime) {
                         const nowTZ = getCurrentTimeInTimezone(resolvedTz);
@@ -958,17 +998,21 @@ const AttendanceMonitoring = () => {
                     <div className="flex space-x-1 bg-slate-100 dark:bg-github-dark-subtle p-1 rounded-xl w-fit">
                         <button
                             onClick={() => setActiveTab('live')}
-                            className={`flex items-center gap-2 px-6 py-3 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${activeTab === 'live' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'}`}
+                            className={`px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'live' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'}`}
                         >
-                            <LayoutGrid size={16} className={`${activeTab === 'live' ? 'text-indigo-500' : 'text-slate-400'} -mt-[1px]`} />
-                            <span className="leading-none">Live Dashboard</span>
+                            <div className="flex items-center gap-2">
+                                <LayoutGrid size={18} />
+                                Live Dashboard
+                            </div>
                         </button>
                         <button
                             onClick={() => setActiveTab('requests')}
-                            className={`relative flex items-center gap-2 px-6 py-3 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${activeTab === 'requests' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'}`}
+                            className={`relative px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'requests' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'}`}
                         >
-                            <FileText size={16} className={`${activeTab === 'requests' ? 'text-indigo-500' : 'text-slate-400'} -mt-[1px]`} />
-                            <span className="leading-none">Correction Requests</span>
+                            <div className="flex items-center gap-2">
+                                <FileText size={18} />
+                                Correction Requests
+                            </div>
                             {requestCount > 0 && activeTab !== 'requests' && (
                                 <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full animate-pulse border-2 border-slate-100 dark:border-github-dark-subtle">
                                     {requestCount}
@@ -1101,7 +1145,7 @@ const AttendanceMonitoring = () => {
                                         </div>
 
                                         {/* Uniform View Switcher */}
-                                        <div className="flex space-x-1 bg-slate-100 dark:bg-github-dark-subtle p-1 rounded-lg w-fit border border-slate-200 dark:border-github-dark-border/50">
+                                        <div className="flex space-x-1 bg-slate-100 dark:bg-github-dark-subtle p-1 rounded-xl w-fit border border-slate-200 dark:border-github-dark-border/50">
                                             {[
                                                 { id: 'cards', label: 'Overview', icon: LayoutGrid },
                                                 { id: 'graph', label: 'Analytics', icon: BarChartIcon },
@@ -1111,13 +1155,15 @@ const AttendanceMonitoring = () => {
                                                 <button
                                                     key={view.id}
                                                     onClick={() => setActiveView(view.id)}
-                                                    className={`flex items-center gap-2 px-5 py-3 rounded-md text-[11px] font-black uppercase tracking-tighter transition-all duration-200 ${activeView === view.id
+                                                    className={`px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${activeView === view.id
                                                         ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
                                                         : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'
                                                         }`}
                                                 >
-                                                    <view.icon size={14} className={`${activeView === view.id ? 'text-indigo-500' : 'text-slate-400'} -mt-[0.5px]`} />
-                                                    <span className="leading-none">{view.label}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <view.icon size={18} />
+                                                        {view.label}
+                                                    </div>
                                                 </button>
                                             ))}
                                         </div>

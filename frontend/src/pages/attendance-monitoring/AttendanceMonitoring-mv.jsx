@@ -161,6 +161,8 @@ const MobileAttendanceMonitoring = () => {
     // Filters
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedDept, setSelectedDept] = useState('All');
+    const [statusFilter, setStatusFilter] = useState('All');
+    const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
     // Selection/Popup State
@@ -169,6 +171,14 @@ const MobileAttendanceMonitoring = () => {
     const [requestSubTab, setRequestSubTab] = useState('PENDING');
 
     const DEPARTMENTS = ['All', 'Sales', 'Retail', 'Logistics', 'Operations', 'IT', 'HR'];
+    const STATUS_OPTIONS = [
+        { value: 'All', label: 'All Statuses' },
+        { value: 'Active', label: 'Timed-In (Active)' },
+        { value: 'Present', label: 'Timed-Out (Done)' },
+        { value: 'Missed Punch', label: 'Missed Punch' },
+        { value: 'Absent', label: 'Absent' },
+        { value: 'Leave', label: 'Leave / Holiday / Off' }
+    ];
 
     const handleTabChange = (newTab) => {
         const currentIndex = MAIN_TABS.indexOf(activeTab);
@@ -406,20 +416,43 @@ const MobileAttendanceMonitoring = () => {
         return () => observer.disconnect();
     }, []);
 
+    // --- FILTERED DATA ---
+    const filteredEmployees = attendanceData.filter(e => {
+        const matchesSearch = e.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             e.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             e.department.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesDept = selectedDept === 'All' || e.department === selectedDept;
+
+        let matchesStatus = true;
+        if (statusFilter === 'Active') {
+            matchesStatus = e.status === 'Active' || e.status === 'Late Active' || (e.sessions && e.sessions.some(s => s.isActive));
+        } else if (statusFilter === 'Present') { // Timed-Out (Done)
+            matchesStatus = e.sessions && e.sessions.some(s => s.rawOut !== null);
+        } else if (statusFilter === 'Missed Punch') {
+            matchesStatus = e.status === 'Missed Punch';
+        } else if (statusFilter === 'Absent') {
+            matchesStatus = e.status === 'Absent';
+        } else if (statusFilter === 'Leave') {
+            matchesStatus = e.status === 'Leave' || e.status === 'Holiday' || e.status === 'Week Off';
+        }
+
+        return matchesSearch && matchesDept && matchesStatus;
+    });
+
     // --- ANALYTICS DATA PROCESSING (Ported from Web) ---
     const chartData = useMemo(() => {
-        if (!attendanceData.length) return { status: [], timeline: [], departments: [], frequency: [] };
+        if (!filteredEmployees.length) return { status: [], timeline: [], departments: [], frequency: [] };
 
         // 1. Status Pie
-        const active = attendanceData.filter(d => d.status === 'Active' || d.status === 'Late Active').length;
-        const present = attendanceData.filter(d => d.status === 'Present').length;
-        const late = attendanceData.filter(d => d.status === 'Late').length;
-        const overtime = attendanceData.filter(d => d.status === 'Overtime').length;
-        const missedPunch = attendanceData.filter(d => d.status === 'Missed Punch').length;
-        const absent = attendanceData.filter(d => d.status === 'Absent').length;
-        const weekOff = attendanceData.filter(d => d.status === 'Week Off').length;
-        const holiday = attendanceData.filter(d => d.status === 'Holiday').length;
-        const leave = attendanceData.filter(d => d.status === 'Leave').length;
+        const active = filteredEmployees.filter(d => d.status === 'Active' || d.status === 'Late Active').length;
+        const present = filteredEmployees.filter(d => d.status === 'Present').length;
+        const late = filteredEmployees.filter(d => d.status === 'Late').length;
+        const overtime = filteredEmployees.filter(d => d.status === 'Overtime').length;
+        const missedPunch = filteredEmployees.filter(d => d.status === 'Missed Punch').length;
+        const absent = filteredEmployees.filter(d => d.status === 'Absent').length;
+        const weekOff = filteredEmployees.filter(d => d.status === 'Week Off').length;
+        const holiday = filteredEmployees.filter(d => d.status === 'Holiday').length;
+        const leave = filteredEmployees.filter(d => d.status === 'Leave').length;
 
         const status = [
             { name: 'Active', value: active, color: '#3b82f6' },
@@ -437,7 +470,7 @@ const MobileAttendanceMonitoring = () => {
         const hourlyData = {};
         for (let i = 0; i <= 23; i++) hourlyData[i] = { checkins: 0, repeats: 0, active: 0 };
 
-        attendanceData.forEach(item => {
+        filteredEmployees.forEach(item => {
             item.sessions.forEach((s, idx) => {
                 const h = s.rawIn.getHours();
                 if (hourlyData.hasOwnProperty(h)) {
@@ -465,7 +498,7 @@ const MobileAttendanceMonitoring = () => {
 
         // 3. Department Breakdown
         const deptStats = {};
-        attendanceData.forEach(item => {
+        filteredEmployees.forEach(item => {
             const dept = item.department || 'General';
             if (!deptStats[dept]) deptStats[dept] = { name: dept, Present: 0, Absent: 0, Late: 0 };
 
@@ -477,7 +510,7 @@ const MobileAttendanceMonitoring = () => {
 
         // 4. Login Frequency
         const freq = { '1 Session': 0, '2 Sessions': 0, '3 Sessions': 0, '4+ Sessions': 0 };
-        attendanceData.forEach(item => {
+        filteredEmployees.forEach(item => {
             if (item.status !== 'Absent' && item.status !== 'Week Off' && item.status !== 'Holiday' && item.status !== 'Leave') {
                 const count = item.sessions.length;
                 if (count === 1) freq['1 Session']++;
@@ -489,14 +522,7 @@ const MobileAttendanceMonitoring = () => {
         const frequency = Object.entries(freq).map(([name, value]) => ({ name, value }));
 
         return { status, timeline, departments, frequency };
-    }, [attendanceData]);
-
-    // --- FILTERED DATA ---
-    const filteredEmployees = attendanceData.filter(e => {
-        const matchesSearch = e.name.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesDept = selectedDept === 'All' || e.department === selectedDept;
-        return matchesSearch && matchesDept;
-    });
+    }, [filteredEmployees]);
 
     const activeEmployees = filteredEmployees.filter(e => e.status !== 'Absent' && e.status !== 'Week Off' && e.status !== 'Holiday' && e.status !== 'Leave');
     const absentEmployees = filteredEmployees.filter(e => ['Absent', 'Week Off', 'Holiday', 'Leave'].includes(e.status));
@@ -677,7 +703,14 @@ const MobileAttendanceMonitoring = () => {
                                                         className="w-full pl-10 pr-4 py-3 bg-white dark:bg-dark-card border border-slate-100 dark:border-github-dark-border rounded-lg text-xs font-bold outline-none shadow-sm focus:ring-2 focus:ring-indigo-500/20 transition-all dark:text-white"
                                                     />
                                                 </div>
-                                                <button className="w-12 h-12 bg-white dark:bg-dark-card border border-slate-100 dark:border-github-dark-border rounded-lg flex items-center justify-center text-slate-400 shadow-sm active:scale-90 transition-transform">
+                                                <button
+                                                    onClick={() => setIsFilterDrawerOpen(true)}
+                                                    className={`w-12 h-12 border rounded-lg flex items-center justify-center shadow-sm active:scale-90 transition-all ${
+                                                        selectedDept !== 'All' || statusFilter !== 'All'
+                                                            ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/20 dark:border-indigo-900/40 dark:text-indigo-400'
+                                                            : 'bg-white dark:bg-dark-card border-slate-100 dark:border-github-dark-border text-slate-400'
+                                                    }`}
+                                                >
                                                     <Filter size={18} />
                                                 </button>
                                             </div>
@@ -976,6 +1009,17 @@ const MobileAttendanceMonitoring = () => {
                     {selectedRequest && (
                         <RequestDetailModal request={selectedRequest} onClose={() => setSelectedRequest(null)} onUpdate={fetchData} />
                     )}
+                    {isFilterDrawerOpen && (
+                        <FilterDrawer
+                            onClose={() => setIsFilterDrawerOpen(false)}
+                            selectedDept={selectedDept}
+                            setSelectedDept={setSelectedDept}
+                            statusFilter={statusFilter}
+                            setStatusFilter={setStatusFilter}
+                            departments={DEPARTMENTS}
+                            statusOptions={STATUS_OPTIONS}
+                        />
+                    )}
                 </AnimatePresence>
             </div>
         </MobileDashboardLayout>
@@ -1139,6 +1183,111 @@ const CompactEmployeeCard = ({ employee, onClick, avatarTimestamp }) => {
                 )}
             </div>
         </div>
+    );
+};
+
+const FilterDrawer = ({
+    onClose,
+    selectedDept,
+    setSelectedDept,
+    statusFilter,
+    setStatusFilter,
+    departments,
+    statusOptions
+}) => {
+    return createPortal(
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-end">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-md" onClick={onClose} />
+            <motion.div
+                initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+                className="relative w-full bg-slate-50 dark:bg-dark-card rounded-t-xl p-6 pb-12 max-h-[85vh] overflow-y-auto border-t border-slate-200 dark:border-github-dark-border"
+            >
+                <div className="w-12 h-1 bg-slate-200 dark:bg-white/10 rounded-full mx-auto mb-6" />
+
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-lg font-black text-slate-800 dark:text-white leading-none">Filters</h3>
+                    {(selectedDept !== 'All' || statusFilter !== 'All') && (
+                        <button
+                            onClick={() => {
+                                setSelectedDept('All');
+                                setStatusFilter('All');
+                            }}
+                            className="text-xs font-bold text-indigo-500 hover:text-indigo-650"
+                        >
+                            Reset Filters
+                        </button>
+                    )}
+                </div>
+
+                <div className="space-y-6">
+                    {/* Department Filter */}
+                    <div className="space-y-2.5">
+                        <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-widest block px-1">
+                            Department
+                        </span>
+                        <div className="grid grid-cols-2 gap-2">
+                            {departments.map((dept) => {
+                                const deptName = typeof dept === 'object' ? dept.value : dept;
+                                const deptLabel = typeof dept === 'object' ? dept.label : (dept === 'All' ? 'All Departments' : dept);
+                                const isSelected = selectedDept === deptName;
+                                return (
+                                    <button
+                                        key={deptName}
+                                        onClick={() => setSelectedDept(deptName)}
+                                        className={`py-3 px-4 rounded-xl text-xs font-bold transition-all border text-center ${
+                                            isSelected
+                                                ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/20 dark:border-indigo-900/40 dark:text-indigo-400'
+                                                : 'bg-white dark:bg-[#0d1117] border-slate-200/60 dark:border-github-dark-border text-slate-600 dark:text-slate-300'
+                                        }`}
+                                    >
+                                        {deptLabel}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Status Filter */}
+                    <div className="space-y-2.5">
+                        <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-widest block px-1">
+                            Attendance Status
+                        </span>
+                        <div className="grid grid-cols-2 gap-2">
+                            {statusOptions.map((opt) => {
+                                const isSelected = statusFilter === opt.value;
+                                return (
+                                    <button
+                                        key={opt.value}
+                                        onClick={() => setStatusFilter(opt.value)}
+                                        className={`py-3 px-4 rounded-xl text-xs font-bold transition-all border text-center ${
+                                            isSelected
+                                                ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/20 dark:border-indigo-900/40 dark:text-indigo-400'
+                                                : 'bg-white dark:bg-[#0d1117] border-slate-200/60 dark:border-github-dark-border text-slate-600 dark:text-slate-300'
+                                        }`}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-8">
+                    <button
+                        onClick={onClose}
+                        className="w-full py-4 bg-indigo-500 text-white font-black rounded-xl active:scale-95 transition-all shadow-lg shadow-indigo-500/20"
+                    >
+                        Apply Filters
+                    </button>
+                </div>
+
+                <button onClick={onClose} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600 active:scale-90 transition-all">
+                    <X size={24} />
+                </button>
+            </motion.div>
+        </motion.div>,
+        document.body
     );
 };
 

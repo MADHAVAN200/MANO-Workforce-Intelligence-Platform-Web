@@ -426,6 +426,8 @@ const AttendanceMonitoring = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [departmentFilter, setDepartmentFilter] = useState('All');
     const [isDeptDropdownOpen, setIsDeptDropdownOpen] = useState(false);
+    const [statusFilter, setStatusFilter] = useState('All');
+    const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
     const [selectedDate, setSelectedDate] = React.useState(new Date().toISOString().split("T")[0]);
     const [lastSynced, setLastSynced] = React.useState(new Date());
 
@@ -437,6 +439,15 @@ const AttendanceMonitoring = () => {
         { value: 'Operations', label: 'Operations' },
         { value: 'IT', label: 'IT' },
         { value: 'HR', label: 'HR' }
+    ];
+
+    const STATUS_OPTIONS = [
+        { value: 'All', label: 'All Statuses' },
+        { value: 'Active', label: 'Timed-In (Active)' },
+        { value: 'Present', label: 'Timed-Out (Done)' },
+        { value: 'Missed Punch', label: 'Missed Punch' },
+        { value: 'Absent', label: 'Absent' },
+        { value: 'Leave', label: 'Leave / Holiday / Off' }
     ];
 
     // Data Fetching
@@ -702,9 +713,25 @@ const AttendanceMonitoring = () => {
 
     // Filter Logic for Live Tab
     const filteredData = attendanceData.filter(item => {
-        const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             item.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             item.department.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesDept = departmentFilter === 'All' || item.department === departmentFilter;
-        return matchesSearch && matchesDept;
+        
+        let matchesStatus = true;
+        if (statusFilter === 'Active') {
+            matchesStatus = item.status === 'Active' || item.status === 'Late Active' || (item.sessions && item.sessions.some(s => s.isActive));
+        } else if (statusFilter === 'Present') { // Timed-Out (Done)
+            matchesStatus = item.sessions && item.sessions.some(s => s.rawOut !== null);
+        } else if (statusFilter === 'Missed Punch') {
+            matchesStatus = item.status === 'Missed Punch';
+        } else if (statusFilter === 'Absent') {
+            matchesStatus = item.status === 'Absent';
+        } else if (statusFilter === 'Leave') {
+            matchesStatus = item.status === 'Leave' || item.status === 'Holiday' || item.status === 'Week Off';
+        }
+
+        return matchesSearch && matchesDept && matchesStatus;
     });
 
     const getStatusStyle = (status) => {
@@ -796,15 +823,15 @@ const AttendanceMonitoring = () => {
 
     const getStatusData = () => {
         // Create disjoint sets that sum to total headcount for a valid Pie Chart
-        const active = attendanceData.filter(d => d.status === 'Active' || d.status === 'Late Active').length;
-        const missedPunch = attendanceData.filter(d => d.status === 'Missed Punch').length;
-        const overtime = attendanceData.filter(d => d.status === 'Overtime').length;
-        const late = attendanceData.filter(d => d.status === 'Late').length;
-        const present = attendanceData.filter(d => d.status === 'Present').length;
-        const absent = attendanceData.filter(d => d.status === 'Absent').length;
-        const weekOff = attendanceData.filter(d => d.status === 'Week Off').length;
-        const holiday = attendanceData.filter(d => d.status === 'Holiday').length;
-        const leave = attendanceData.filter(d => d.status === 'Leave').length;
+        const active = filteredData.filter(d => d.status === 'Active' || d.status === 'Late Active').length;
+        const missedPunch = filteredData.filter(d => d.status === 'Missed Punch').length;
+        const overtime = filteredData.filter(d => d.status === 'Overtime').length;
+        const late = filteredData.filter(d => d.status === 'Late').length;
+        const present = filteredData.filter(d => d.status === 'Present').length;
+        const absent = filteredData.filter(d => d.status === 'Absent').length;
+        const weekOff = filteredData.filter(d => d.status === 'Week Off').length;
+        const holiday = filteredData.filter(d => d.status === 'Holiday').length;
+        const leave = filteredData.filter(d => d.status === 'Leave').length;
 
         return [
             { name: 'Present', value: present, color: '#10b981' },
@@ -821,7 +848,7 @@ const AttendanceMonitoring = () => {
 
     const getDepartmentData = () => {
         const deptStats = {};
-        attendanceData.forEach(item => {
+        filteredData.forEach(item => {
             const dept = item.department || 'Unknown';
             if (!deptStats[dept]) deptStats[dept] = { name: dept, Present: 0, Absent: 0, Late: 0 };
 
@@ -839,7 +866,7 @@ const AttendanceMonitoring = () => {
             hourlyData[i] = { checkins: 0, repeats: 0, active: 0 };
         }
 
-        attendanceData.forEach(item => {
+        filteredData.forEach(item => {
             item.sessions.forEach((session, index) => {
                 const inTime = session.rawIn;
                 const inHour = inTime.getHours();
@@ -884,7 +911,7 @@ const AttendanceMonitoring = () => {
             '4+ Sessions': 0
         };
 
-        attendanceData.forEach(item => {
+        filteredData.forEach(item => {
             if (item.status !== 'Absent') {
                 const count = item.sessions.length;
                 if (count === 1) frequency['1 Session']++;
@@ -1132,6 +1159,59 @@ const AttendanceMonitoring = () => {
                                                                                     }`}
                                                                             >
                                                                                 <span>{dept.label}</span>
+                                                                                {isSelected && <Check size={12} className="text-indigo-500" />}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </motion.div>
+                                                        </>
+                                                    )}
+                                                </AnimatePresence>
+                                            </div>
+
+                                            <div className="relative">
+                                                <button
+                                                    onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+                                                    className="pl-10 pr-8 py-2.5 text-xs rounded-lg border border-slate-200 dark:border-github-dark-border bg-slate-50 dark:bg-github-dark-subtle/20 text-slate-700 dark:text-github-dark-text outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner min-w-[155px] font-bold text-left flex items-center justify-between gap-2"
+                                                >
+                                                    <span className="truncate">
+                                                        {STATUS_OPTIONS.find(s => s.value === statusFilter)?.label || 'All Statuses'}
+                                                    </span>
+                                                    <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 shrink-0 ${isStatusDropdownOpen ? 'rotate-180' : ''}`} />
+                                                </button>
+                                                <Filter size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+
+                                                <AnimatePresence>
+                                                    {isStatusDropdownOpen && (
+                                                        <>
+                                                            <div
+                                                                className="fixed inset-0 z-[80]"
+                                                                onClick={() => setIsStatusDropdownOpen(false)}
+                                                            />
+                                                            <motion.div
+                                                                initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                                exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                                                                transition={{ duration: 0.15 }}
+                                                                className="absolute top-full left-0 mt-1.5 w-full min-w-[180px] bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-github-dark-border rounded-xl shadow-2xl overflow-hidden z-[90]"
+                                                            >
+                                                                <div className="py-1 max-h-60 overflow-y-auto custom-scrollbar">
+                                                                    {STATUS_OPTIONS.map((statusOpt) => {
+                                                                        const isSelected = statusFilter === statusOpt.value;
+                                                                        return (
+                                                                            <button
+                                                                                key={statusOpt.value}
+                                                                                onClick={() => {
+                                                                                    setStatusFilter(statusOpt.value);
+                                                                                    setIsStatusDropdownOpen(false);
+                                                                                }}
+                                                                                className={`w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold transition-colors text-left ${isSelected
+                                                                                    ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
+                                                                                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                                                                    }`}
+                                                                            >
+                                                                                <span>{statusOpt.label}</span>
                                                                                 {isSelected && <Check size={12} className="text-indigo-500" />}
                                                                             </button>
                                                                         );

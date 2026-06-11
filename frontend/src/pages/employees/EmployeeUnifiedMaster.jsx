@@ -10,6 +10,7 @@ import {
     Sliders, Edit2, RotateCcw
 } from 'lucide-react';
 import { adminService } from '../../services/adminService';
+import { onboardingService } from '../../services/onboardingService';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,158 +19,7 @@ import EmployeeFormContent from '../../components/employees/EmployeeFormContent'
 import ConfirmationModal from '../../components/modals/ConfirmationModal';
 import { PerformanceHub, AiPerformanceAnalyzer } from '../performance/PerformanceViews';
 
-// Document categories and checklist items redefined as templates
-const DEFAULT_CHECKLIST_TEMPLATES = [
-    {
-        id: 'dev_onboarding',
-        name: 'Developer Onboarding',
-        items: [
-            { key: 'personal_info', label: 'Personal Info Submission' },
-            { key: 'laptop_assigned', label: 'Laptop Assignment' },
-            { key: 'github_access', label: 'GitHub Repository Access' },
-            { key: 'slack_aws_invites', label: 'Slack/AWS Invites' },
-            { key: 'codebase_walkthrough', label: 'Codebase Walkthrough' },
-            { key: 'dev_setup', label: 'Dev Environment Setup' }
-        ]
-    },
-    {
-        id: 'mgmt_onboarding',
-        name: 'Management Onboarding',
-        items: [
-            { key: 'personal_info', label: 'Personal Info Submission' },
-            { key: 'hr_policy', label: 'HR Policy Briefing' },
-            { key: 'team_intro', label: 'Team Introductions' },
-            { key: 'okr_alignment', label: 'OKR Alignment' },
-            { key: 'dashboard_training', label: 'Dashboard Training' }
-        ]
-    },
-    {
-        id: 'support_onboarding',
-        name: 'General Support',
-        items: [
-            { key: 'office_tour', label: 'Office Tour' },
-            { key: 'id_card', label: 'ID Card Collection' },
-            { key: 'uniform_handover', label: 'Uniform Handover' },
-            { key: 'health_safety', label: 'Health & Safety Briefing' }
-        ]
-    }
-];
-
-const DEFAULT_DOCUMENT_TEMPLATES = [
-    {
-        id: 'dev_docs',
-        name: 'Developer Profile Documents',
-        categories: [
-            {
-                id: 'identity',
-                name: 'Identity Documents',
-                items: [
-                    { key: 'aadhaar', name: 'Aadhaar Card', required: true },
-                    { key: 'pan', name: 'PAN Card', required: true },
-                    { key: 'passport', name: 'Passport', required: false }
-                ]
-            },
-            {
-                id: 'educational',
-                name: 'Educational Documents',
-                items: [
-                    { key: 'ssc', name: 'SSC (10th Marksheet)', required: true },
-                    { key: 'hsc', name: 'HSC (12th Marksheet)', required: true },
-                    { key: 'degree', name: 'Degree Certificate', required: true },
-                    { key: 'consolidated', name: 'Consolidated Marksheet', required: true }
-                ]
-            },
-            {
-                id: 'employment',
-                name: 'Employment Documents',
-                items: [
-                    { key: 'experience_letter', name: 'Experience Letter', required: true },
-                    { key: 'relieving_letter', name: 'Relieving Letter', required: true },
-                    { key: 'salary_slips', name: 'Salary Slips (Last 3 Months)', required: true }
-                ]
-            },
-            {
-                id: 'banking',
-                name: 'Banking Documents',
-                items: [
-                    { key: 'cheque', name: 'Cancelled Cheque', required: true },
-                    { key: 'passbook', name: 'Passbook Copy', required: true }
-                ]
-            }
-        ]
-    },
-    {
-        id: 'mgmt_docs',
-        name: 'Management Profile Documents',
-        categories: [
-            {
-                id: 'identity',
-                name: 'Identity Documents',
-                items: [
-                    { key: 'aadhaar', name: 'Aadhaar Card', required: true },
-                    { key: 'pan', name: 'PAN Card', required: true }
-                ]
-            },
-            {
-                id: 'educational',
-                name: 'Educational Documents',
-                items: [
-                    { key: 'mba_degree', name: 'MBA Degree Certificate', required: true },
-                    { key: 'grad_degree', name: 'Graduation Degree', required: true }
-                ]
-            },
-            {
-                id: 'employment',
-                name: 'Employment Documents',
-                items: [
-                    { key: 'relieving_letter', name: 'Relieving Letter', required: true },
-                    { key: 'ref_contact', name: 'Reference Contact Letter', required: false }
-                ]
-            },
-            {
-                id: 'banking',
-                name: 'Banking Documents',
-                items: [
-                    { key: 'cheque', name: 'Cancelled Cheque', required: true }
-                ]
-            }
-        ]
-    },
-    {
-        id: 'support_docs',
-        name: 'Support Profile Documents',
-        categories: [
-            {
-                id: 'identity',
-                name: 'Identity Documents',
-                items: [
-                    { key: 'aadhaar', name: 'Aadhaar Card', required: true }
-                ]
-            },
-            {
-                id: 'banking',
-                name: 'Banking Documents',
-                items: [
-                    { key: 'passbook', name: 'Passbook Copy', required: true }
-                ]
-            },
-            {
-                id: 'compliance',
-                name: 'Compliance Documents',
-                items: [
-                    { key: 'pf', name: 'PF Details', required: false }
-                ]
-            }
-        ]
-    }
-];
-
-const DEFAULT_CYCLES = [
-    { id: 'cycle-1', name: 'Q1 2026 Performance Cycle', type: 'Quarterly', status: 'Evaluating', startDate: '2026-01-01', endDate: '2026-03-31' },
-    { id: 'cycle-2', name: 'Q2 2026 Performance Cycle', type: 'Quarterly', status: 'Active', startDate: '2026-04-01', endDate: '2026-06-30' },
-    { id: 'cycle-3', name: 'Mid-Year 2026 Appraisal', type: 'Half Yearly', status: 'Closed', startDate: '2026-01-01', endDate: '2026-06-30' },
-    { id: 'cycle-4', name: 'Annual Review 2026', type: 'Yearly', status: 'Closed', startDate: '2026-01-01', endDate: '2026-12-31' }
-];
+// Loaded dynamically from configurations database
 
 const MOCK_BACKUP_EMPLOYEES = [
     { id: 101, user_code: 'EMP-101', name: 'Sathish Kumar', email: 'sathish@mano.co.in', phone: '9876543210', department: 'Engineering', designation: 'Tech Lead', status: 'Active', joiningDate: '2024-05-10', profile_image_url: '' },
@@ -200,17 +50,7 @@ const EmployeeUnifiedMaster = () => {
 
     // Performance Appraisals Cycle state
     const [selectedCycleId, setSelectedCycleId] = useState('cycle-2');
-    const [cycles, setCycles] = useState(() => {
-        const stored = localStorage.getItem('mano_performance_cycles');
-        if (stored) {
-            try {
-                return JSON.parse(stored);
-            } catch (e) {
-                console.error(e);
-            }
-        }
-        return DEFAULT_CYCLES;
-    });
+    const [cycles, setCycles] = useState([]);
 
 
     // AI Document Auditor states
@@ -296,32 +136,31 @@ const EmployeeUnifiedMaster = () => {
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Template States
-    const [checklistTemplates, setChecklistTemplates] = useState(() => {
-        const stored = localStorage.getItem('mano_checklist_templates');
-        if (stored) {
-            try {
-                return JSON.parse(stored);
-            } catch (e) {
-                console.error(e);
-            }
-        }
-        localStorage.setItem('mano_checklist_templates', JSON.stringify(DEFAULT_CHECKLIST_TEMPLATES));
-        return DEFAULT_CHECKLIST_TEMPLATES;
+    const [onboardingData, setOnboardingData] = useState({
+        checklist_template_id: null,
+        document_template_id: null,
+        checklist_items: [],
+        checklist_progress: [],
+        required_documents: [],
+        uploaded_documents: []
     });
 
-    const [documentTemplates, setDocumentTemplates] = useState(() => {
-        const stored = localStorage.getItem('mano_document_templates');
-        if (stored) {
-            try {
-                return JSON.parse(stored);
-            } catch (e) {
-                console.error(e);
+    const loadEmployeeOnboarding = async (employeeId) => {
+        if (!employeeId) return;
+        try {
+            const res = await onboardingService.getEmployeeOnboardingProgress(employeeId);
+            if (res.success) {
+                setOnboardingData(res);
             }
+        } catch (error) {
+            console.error("Error loading onboarding progress:", error);
         }
-        localStorage.setItem('mano_document_templates', JSON.stringify(DEFAULT_DOCUMENT_TEMPLATES));
-        return DEFAULT_DOCUMENT_TEMPLATES;
-    });
+    };
+
+    // Template States
+    const [checklistTemplates, setChecklistTemplates] = useState([]);
+
+    const [documentTemplates, setDocumentTemplates] = useState([]);
 
     // Template Modals & Forms States
     const [showTemplatesModal, setShowTemplatesModal] = useState(false);
@@ -334,6 +173,13 @@ const EmployeeUnifiedMaster = () => {
     const [newDocCatText, setNewDocCatText] = useState('');
     const [newDocItemNames, setNewDocItemNames] = useState({}); // catId -> text
     const [newDocItemRequired, setNewDocItemRequired] = useState({}); // catId -> bool
+    const [editingCategoryNames, setEditingCategoryNames] = useState({}); // catId -> text
+    const [tempChecklistName, setTempChecklistName] = useState('');
+    const [tempChecklistId, setTempChecklistId] = useState('');
+    const [tempDocName, setTempDocName] = useState('');
+    const [tempDocId, setTempDocId] = useState('');
+    const [tempCycleName, setTempCycleName] = useState('');
+    const [tempCycleId, setTempCycleId] = useState('');
 
     useEffect(() => {
         if (checklistTemplates.length > 0 && !selectedChecklistTemplateId) {
@@ -353,7 +199,7 @@ const EmployeeUnifiedMaster = () => {
         }
     }, [cycles, selectedCyclesManagerId]);
 
-    const handleCreateNewCycleInManager = () => {
+    const handleCreateNewCycleInManager = async () => {
         const newId = `cycle-${Date.now()}`;
         const newCycle = {
             id: newId,
@@ -364,28 +210,59 @@ const EmployeeUnifiedMaster = () => {
             endDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             targetEmployeeType: 'All'
         };
-        const updated = [...cycles, newCycle];
-        setCycles(updated);
-        localStorage.setItem('mano_performance_cycles', JSON.stringify(updated));
+
+        // Optimistically update UI
+        setCycles(prev => [...prev, newCycle]);
         setSelectedCyclesManagerId(newId);
-        toast.success('New Appraisal Cycle created in manager');
+
+        try {
+            await onboardingService.createPerformanceCycle({
+                id: newCycle.id,
+                name: newCycle.name,
+                type: newCycle.type,
+                status: newCycle.status,
+                target_group: newCycle.targetEmployeeType,
+                start_date: newCycle.startDate,
+                end_date: newCycle.endDate
+            });
+            await refreshCycles();
+            toast.success('New Appraisal Cycle created');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to create performance cycle");
+            await refreshCycles(); // Revert
+        }
     };
 
-    const handleUpdateCycleField = (id, field, value) => {
-        const updated = cycles.map(c => {
-            if (c.id === id) {
-                return { ...c, [field]: value };
-            }
-            return c;
-        });
-        setCycles(updated);
-        localStorage.setItem('mano_performance_cycles', JSON.stringify(updated));
+    const handleUpdateCycleField = async (id, field, value) => {
+        const cycle = cycles.find(c => c.id === id);
+        if (!cycle) return;
+
+        const updatedCycle = { ...cycle, [field]: value };
+
+        // Optimistically update UI
+        setCycles(prev => prev.map(c => c.id === id ? updatedCycle : c));
+
+        try {
+            await onboardingService.updatePerformanceCycle(id, {
+                name: updatedCycle.name,
+                type: updatedCycle.type,
+                status: updatedCycle.status,
+                target_group: updatedCycle.targetEmployeeType,
+                start_date: updatedCycle.startDate,
+                end_date: updatedCycle.endDate
+            });
+            await refreshCycles();
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to update cycle");
+            await refreshCycles(); // Revert
+        }
     };
 
-    const handleDeleteCycleFromManager = (id) => {
+    const handleDeleteCycleFromManager = async (id) => {
         const updated = cycles.filter(c => c.id !== id);
         setCycles(updated);
-        localStorage.setItem('mano_performance_cycles', JSON.stringify(updated));
         
         // Select next available or empty
         if (updated.length > 0) {
@@ -399,244 +276,657 @@ const EmployeeUnifiedMaster = () => {
                 setSelectedCycleId('');
             }
         }
-        toast.info('Performance cycle deleted');
+
+        try {
+            await onboardingService.deletePerformanceCycle(id);
+            await refreshCycles();
+            toast.info('Performance cycle deleted');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to delete performance cycle");
+            await refreshCycles(); // Revert
+        }
     };
 
     // Checklist Template Handler functions
-    const handleAddChecklistTemplate = () => {
-        const newId = `checklist_template_${Date.now()}`;
-        const newTemplate = {
-            id: newId,
-            name: 'New Checklist Template',
-            items: [
-                { key: 'personal_info', label: 'Personal Info Submission' }
-            ]
-        };
-        const updated = [...checklistTemplates, newTemplate];
-        setChecklistTemplates(updated);
-        localStorage.setItem('mano_checklist_templates', JSON.stringify(updated));
-        setSelectedChecklistTemplateId(newId);
-        toast.success('New checklist template created');
-    };
-
-    const handleUpdateChecklistTemplateName = (id, newName) => {
-        const updated = checklistTemplates.map(t => {
-            if (t.id === id) {
-                return { ...t, name: newName };
-            }
-            return t;
-        });
-        setChecklistTemplates(updated);
-        localStorage.setItem('mano_checklist_templates', JSON.stringify(updated));
-    };
-
-    const handleAddChecklistTemplateItem = (id, label) => {
-        if (!label.trim()) return;
-        const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_+|_+$)/g, '');
-        const updated = checklistTemplates.map(t => {
-            if (t.id === id) {
-                let uniqueKey = key;
-                let counter = 1;
-                while (t.items.some(item => item.key === uniqueKey)) {
-                    uniqueKey = `${key}_${counter}`;
-                    counter++;
+    const refreshChecklistTemplates = async () => {
+        try {
+            const res = await onboardingService.getChecklistTemplates();
+            if (res.success) {
+                const mapped = res.data.map(t => ({
+                    id: t.id,
+                    name: t.template_name,
+                    description: t.description,
+                    items: (t.items || []).map(item => ({
+                        key: item.task_key,
+                        label: item.task_label,
+                        sort_order: item.sort_order
+                    }))
+                }));
+                setChecklistTemplates(mapped);
+                if (mapped.length > 0 && !selectedChecklistTemplateId) {
+                    setSelectedChecklistTemplateId(mapped[0].id);
                 }
-                return {
-                    ...t,
-                    items: [...t.items, { key: uniqueKey, label: label.trim() }]
-                };
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    const refreshDocTemplates = async () => {
+        try {
+            const res = await onboardingService.getDocumentTemplates();
+            if (res.success) {
+                const mapped = res.data.map(t => {
+                    const categoriesMap = {};
+                    (t.items || []).forEach(item => {
+                        if (!categoriesMap[item.category]) {
+                            categoriesMap[item.category] = { id: item.category, name: item.category, items: [] };
+                        }
+                        categoriesMap[item.category].items.push({
+                            key: item.doc_key,
+                            name: item.doc_label,
+                            required: !!item.is_mandatory
+                        });
+                    });
+                    return {
+                        id: t.id,
+                        name: t.template_name,
+                        description: t.description,
+                        categories: Object.values(categoriesMap)
+                    };
+                });
+                setDocumentTemplates(mapped);
+                if (mapped.length > 0 && !selectedDocTemplateId) {
+                    setSelectedDocTemplateId(mapped[0].id);
+                }
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    const refreshCycles = async () => {
+        try {
+            const res = await onboardingService.getPerformanceCycles();
+            if (res.success) {
+                const mapped = res.data.map(c => ({
+                    id: c.id,
+                    name: c.name,
+                    type: c.type,
+                    status: c.status,
+                    targetEmployeeType: c.target_group || 'All',
+                    startDate: c.start_date ? c.start_date.split('T')[0] : '',
+                    endDate: c.end_date ? c.end_date.split('T')[0] : ''
+                }));
+                setCycles(mapped);
+                if (mapped.length > 0 && !selectedCyclesManagerId) {
+                    setSelectedCyclesManagerId(mapped[0].id);
+                }
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    const handleAddChecklistTemplate = async () => {
+        try {
+            const res = await onboardingService.createChecklistTemplate({
+                template_name: 'New Checklist Template',
+                description: '',
+                items: [
+                    { task_key: 'personal_info', task_label: 'Personal Info Submission', sort_order: 0 }
+                ]
+            });
+            if (res.success) {
+                await refreshChecklistTemplates();
+                setSelectedChecklistTemplateId(res.data.id);
+                toast.success('New checklist template created');
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to create checklist template");
+        }
+    };
+
+    const handleUpdateChecklistTemplateName = async (id, newName) => {
+        const template = checklistTemplates.find(t => t.id === id);
+        if (!template) return;
+        try {
+            await onboardingService.updateChecklistTemplate(id, {
+                template_name: newName,
+                items: template.items.map(item => ({
+                    task_key: item.key,
+                    task_label: item.label,
+                    sort_order: item.sort_order
+                }))
+            });
+            await refreshChecklistTemplates();
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleAddChecklistTemplateItem = async (id, label) => {
+        if (!label.trim()) return;
+        const template = checklistTemplates.find(t => t.id === id);
+        if (!template) return;
+
+        const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_+|_+$)/g, '');
+        let uniqueKey = key;
+        let counter = 1;
+        while (template.items.some(item => item.key === uniqueKey)) {
+            uniqueKey = `${key}_${counter}`;
+            counter++;
+        }
+
+        const newItem = { key: uniqueKey, label: label.trim(), sort_order: template.items.length };
+
+        // Optimistically update UI state
+        setChecklistTemplates(prev => prev.map(t => {
+            if (t.id === id) {
+                return { ...t, items: [...t.items, newItem] };
             }
             return t;
-        });
-        setChecklistTemplates(updated);
-        localStorage.setItem('mano_checklist_templates', JSON.stringify(updated));
+        }));
         setNewChecklistItemText('');
-        toast.success('Item added to template');
+
+        const updatedItems = [
+            ...template.items.map(item => ({
+                task_key: item.key,
+                task_label: item.label,
+                sort_order: item.sort_order
+            })),
+            { task_key: uniqueKey, task_label: label.trim(), sort_order: template.items.length }
+        ];
+
+        try {
+            await onboardingService.updateChecklistTemplate(id, {
+                template_name: template.name,
+                items: updatedItems
+            });
+            await refreshChecklistTemplates();
+            toast.success('Item added to template');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to add checklist item");
+            await refreshChecklistTemplates();
+        }
     };
 
-    const handleDeleteChecklistTemplateItem = (templateId, itemKey) => {
-        const updated = checklistTemplates.map(t => {
+    const handleDeleteChecklistTemplateItem = async (templateId, itemKey) => {
+        const template = checklistTemplates.find(t => t.id === templateId);
+        if (!template) return;
+
+        // Optimistically update UI state
+        setChecklistTemplates(prev => prev.map(t => {
             if (t.id === templateId) {
-                return {
-                    ...t,
-                    items: t.items.filter(item => item.key !== itemKey)
-                };
+                return { ...t, items: t.items.filter(item => item.key !== itemKey) };
             }
             return t;
-        });
-        setChecklistTemplates(updated);
-        localStorage.setItem('mano_checklist_templates', JSON.stringify(updated));
-        toast.success('Item removed from template');
+        }));
+
+        const updatedItems = template.items
+            .filter(item => item.key !== itemKey)
+            .map(item => ({
+                task_key: item.key,
+                task_label: item.label,
+                sort_order: item.sort_order
+            }));
+
+        try {
+            await onboardingService.updateChecklistTemplate(templateId, {
+                template_name: template.name,
+                items: updatedItems
+            });
+            await refreshChecklistTemplates();
+            toast.success('Item removed from template');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to remove checklist item");
+            await refreshChecklistTemplates();
+        }
     };
 
-    const handleDeleteChecklistTemplate = (id) => {
+    const handleDeleteChecklistTemplate = async (id) => {
         if (checklistTemplates.length <= 1) {
             toast.error('Cannot delete the last remaining template');
             return;
         }
-        const updated = checklistTemplates.filter(t => t.id !== id);
-        setChecklistTemplates(updated);
-        localStorage.setItem('mano_checklist_templates', JSON.stringify(updated));
-        setSelectedChecklistTemplateId(updated[0].id);
-        toast.success('Checklist template deleted');
+        try {
+            await onboardingService.deleteChecklistTemplate(id);
+            const remaining = checklistTemplates.filter(t => t.id !== id);
+            await refreshChecklistTemplates();
+            setSelectedChecklistTemplateId(remaining[0].id);
+            toast.success('Checklist template deleted');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to delete checklist template");
+        }
     };
 
-    // Document Template Handler functions
-    const handleAddDocTemplate = () => {
-        const newId = `doc_template_${Date.now()}`;
-        const newTemplate = {
-            id: newId,
-            name: 'New Document Template',
-            categories: [
-                {
-                    id: 'identity',
-                    name: 'Identity Documents',
-                    items: [
-                        { key: 'aadhaar', name: 'Aadhaar Card', required: true }
-                    ]
-                }
-            ]
-        };
-        const updated = [...documentTemplates, newTemplate];
-        setDocumentTemplates(updated);
-        localStorage.setItem('mano_document_templates', JSON.stringify(updated));
-        setSelectedDocTemplateId(newId);
-        toast.success('New document template created');
-    };
-
-    const handleUpdateDocTemplateName = (id, newName) => {
-        const updated = documentTemplates.map(t => {
-            if (t.id === id) {
-                return { ...t, name: newName };
+    const handleAddDocTemplate = async () => {
+        try {
+            const res = await onboardingService.createDocumentTemplate({
+                template_name: 'New Document Template',
+                description: '',
+                items: [
+                    { category: 'Identity Documents', doc_key: 'aadhaar', doc_label: 'Aadhaar Card', is_mandatory: true, sort_order: 0 }
+                ]
+            });
+            if (res.success) {
+                await refreshDocTemplates();
+                setSelectedDocTemplateId(res.data.id);
+                toast.success('New document template created');
             }
-            return t;
-        });
-        setDocumentTemplates(updated);
-        localStorage.setItem('mano_document_templates', JSON.stringify(updated));
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to create document template");
+        }
     };
 
-    const handleAddDocTemplateCategory = (templateId, categoryName) => {
+    const handleUpdateDocTemplateName = async (id, newName) => {
+        const template = documentTemplates.find(t => t.id === id);
+        if (!template) return;
+        const flatItems = [];
+        template.categories.forEach(cat => {
+            cat.items.forEach((item, idx) => {
+                flatItems.push({
+                    category: cat.name,
+                    doc_key: item.key,
+                    doc_label: item.name,
+                    is_mandatory: !!item.required,
+                    sort_order: idx
+                });
+            });
+        });
+        try {
+            await onboardingService.updateDocumentTemplate(id, {
+                template_name: newName,
+                items: flatItems
+            });
+            await refreshDocTemplates();
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleAddDocTemplateCategory = async (templateId, categoryName) => {
         if (!categoryName.trim()) return;
+        const template = documentTemplates.find(t => t.id === templateId);
+        if (!template) return;
         const categoryId = categoryName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_+|_+$)/g, '');
-        const updated = documentTemplates.map(t => {
+        
+        let uniqueId = categoryId;
+        let counter = 1;
+        while (template.categories.some(cat => cat.id === uniqueId)) {
+            uniqueId = `${categoryId}_${counter}`;
+            counter++;
+        }
+
+        const placeholderKey = `doc_${Date.now()}`;
+        const newCategory = {
+            id: uniqueId,
+            name: categoryName.trim(),
+            items: [{
+                key: placeholderKey,
+                name: 'New Document Field',
+                required: true
+            }]
+        };
+
+        // Optimistically update UI state
+        setDocumentTemplates(prev => prev.map(t => {
             if (t.id === templateId) {
-                let uniqueId = categoryId;
-                let counter = 1;
-                while (t.categories.some(cat => cat.id === uniqueId)) {
-                    uniqueId = `${categoryId}_${counter}`;
-                    counter++;
-                }
-                return {
-                    ...t,
-                    categories: [...t.categories, { id: uniqueId, name: categoryName.trim(), items: [] }]
-                };
+                return { ...t, categories: [...t.categories, newCategory] };
             }
             return t;
-        });
-        setDocumentTemplates(updated);
-        localStorage.setItem('mano_document_templates', JSON.stringify(updated));
+        }));
         setNewDocCatText('');
-        toast.success('Category added to template');
+
+        const flatItems = [];
+        template.categories.forEach(cat => {
+            cat.items.forEach((item, idx) => {
+                flatItems.push({
+                    category: cat.name,
+                    doc_key: item.key,
+                    doc_label: item.name,
+                    is_mandatory: !!item.required,
+                    sort_order: idx
+                });
+            });
+        });
+        flatItems.push({
+            category: categoryName.trim(),
+            doc_key: placeholderKey,
+            doc_label: 'New Document Field',
+            is_mandatory: true,
+            sort_order: 0
+        });
+
+        try {
+            await onboardingService.updateDocumentTemplate(templateId, {
+                template_name: template.name,
+                items: flatItems
+            });
+            await refreshDocTemplates();
+            toast.success('Category added to template');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to add category");
+            await refreshDocTemplates();
+        }
     };
 
-    const handleDeleteDocTemplateCategory = (templateId, categoryId) => {
-        const updated = documentTemplates.map(t => {
+    const handleRenameDocTemplateCategory = async (templateId, categoryId, newCategoryName) => {
+        if (!newCategoryName || !newCategoryName.trim()) return;
+        const template = documentTemplates.find(t => t.id === templateId);
+        if (!template) return;
+        
+        const flatItems = [];
+        template.categories.forEach(cat => {
+            const currentCatName = (cat.id === categoryId) ? newCategoryName.trim() : cat.name;
+            cat.items.forEach((item, idx) => {
+                flatItems.push({
+                    category: currentCatName,
+                    doc_key: item.key,
+                    doc_label: item.name,
+                    is_mandatory: !!item.required,
+                    sort_order: idx
+                });
+            });
+        });
+
+        // Optimistically update UI state
+        setDocumentTemplates(prev => prev.map(t => {
             if (t.id === templateId) {
                 return {
                     ...t,
-                    categories: t.categories.filter(cat => cat.id !== categoryId)
+                    categories: t.categories.map(cat => {
+                        if (cat.id === categoryId) {
+                            return { ...cat, name: newCategoryName.trim() };
+                        }
+                        return cat;
+                    })
                 };
             }
             return t;
-        });
-        setDocumentTemplates(updated);
-        localStorage.setItem('mano_document_templates', JSON.stringify(updated));
-        toast.success('Category deleted');
+        }));
+
+        try {
+            await onboardingService.updateDocumentTemplate(templateId, {
+                template_name: template.name,
+                items: flatItems
+            });
+            await refreshDocTemplates();
+            setEditingCategoryNames(prev => {
+                const copy = { ...prev };
+                delete copy[categoryId];
+                return copy;
+            });
+            toast.success('Category renamed');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to rename category");
+            await refreshDocTemplates();
+        }
     };
 
-    const handleAddDocTemplateItem = (templateId, categoryId, itemName, isRequired) => {
+    const handleDeleteDocTemplateCategory = async (templateId, categoryId) => {
+        const template = documentTemplates.find(t => t.id === templateId);
+        if (!template) return;
+
+        // Optimistically update UI state
+        setDocumentTemplates(prev => prev.map(t => {
+            if (t.id === templateId) {
+                return { ...t, categories: t.categories.filter(cat => cat.id !== categoryId) };
+            }
+            return t;
+        }));
+
+        const flatItems = [];
+        template.categories.forEach(cat => {
+            if (cat.id === categoryId || cat.name === categoryId) return;
+            cat.items.forEach((item, idx) => {
+                flatItems.push({
+                    category: cat.name,
+                    doc_key: item.key,
+                    doc_label: item.name,
+                    is_mandatory: !!item.required,
+                    sort_order: idx
+                });
+            });
+        });
+
+        try {
+            await onboardingService.updateDocumentTemplate(templateId, {
+                template_name: template.name,
+                items: flatItems
+            });
+            await refreshDocTemplates();
+            toast.success('Category deleted');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to delete category");
+            await refreshDocTemplates();
+        }
+    };
+
+    const handleAddDocTemplateItem = async (templateId, categoryId, itemName, isRequired) => {
         if (!itemName.trim()) return;
+        const template = documentTemplates.find(t => t.id === templateId);
+        if (!template) return;
+
         const itemKey = itemName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_+|_+$)/g, '');
-        const updated = documentTemplates.map(t => {
+        const flatItems = [];
+        template.categories.forEach(cat => {
+            cat.items.forEach((item, idx) => {
+                if (item.name === 'New Document Field' && cat.id === categoryId) return;
+                flatItems.push({
+                    category: cat.name,
+                    doc_key: item.key,
+                    doc_label: item.name,
+                    is_mandatory: !!item.required,
+                    sort_order: idx
+                });
+            });
+        });
+
+        let uniqueKey = itemKey;
+        let counter = 1;
+        while (flatItems.some(i => i.doc_key === uniqueKey)) {
+            uniqueKey = `${itemKey}_${counter}`;
+            counter++;
+        }
+
+        const targetCat = template.categories.find(c => c.id === categoryId);
+        const catName = targetCat ? targetCat.name : categoryId;
+
+        const newItem = {
+            key: uniqueKey,
+            name: itemName.trim(),
+            required: !!isRequired
+        };
+
+        // Optimistically update UI state
+        setDocumentTemplates(prev => prev.map(t => {
             if (t.id === templateId) {
                 return {
                     ...t,
                     categories: t.categories.map(cat => {
                         if (cat.id === categoryId) {
-                            let uniqueKey = itemKey;
-                            let counter = 1;
-                            const allItems = t.categories.flatMap(c => c.items);
-                            while (allItems.some(item => item.key === uniqueKey) || cat.items.some(item => item.key === uniqueKey)) {
-                                uniqueKey = `${itemKey}_${counter}`;
-                                counter++;
-                            }
-                            return {
-                                ...cat,
-                                items: [...cat.items, { key: uniqueKey, name: itemName.trim(), required: isRequired }]
-                            };
+                            const filteredItems = cat.items.filter(item => item.name !== 'New Document Field');
+                            return { ...cat, items: [...filteredItems, newItem] };
                         }
                         return cat;
                     })
                 };
             }
             return t;
-        });
-        setDocumentTemplates(updated);
-        localStorage.setItem('mano_document_templates', JSON.stringify(updated));
+        }));
         setNewDocItemNames(prev => ({ ...prev, [categoryId]: '' }));
-        toast.success('Document item added');
+
+        flatItems.push({
+            category: catName,
+            doc_key: uniqueKey,
+            doc_label: itemName.trim(),
+            is_mandatory: !!isRequired,
+            sort_order: flatItems.filter(i => i.category === catName).length
+        });
+
+        try {
+            await onboardingService.updateDocumentTemplate(templateId, {
+                template_name: template.name,
+                items: flatItems
+            });
+            await refreshDocTemplates();
+            toast.success('Document item added');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to add document item");
+            await refreshDocTemplates();
+        }
     };
 
-    const handleDeleteDocTemplateItem = (templateId, categoryId, itemKey) => {
-        const updated = documentTemplates.map(t => {
+    const handleDeleteDocTemplateItem = async (templateId, categoryId, itemKey) => {
+        const template = documentTemplates.find(t => t.id === templateId);
+        if (!template) return;
+
+        // Optimistically update UI state
+        setDocumentTemplates(prev => prev.map(t => {
             if (t.id === templateId) {
                 return {
                     ...t,
                     categories: t.categories.map(cat => {
                         if (cat.id === categoryId) {
-                            return {
-                                ...cat,
-                                items: cat.items.filter(item => item.key !== itemKey)
-                            };
+                            return { ...cat, items: cat.items.filter(item => item.key !== itemKey) };
                         }
                         return cat;
                     })
                 };
             }
             return t;
+        }));
+
+        const flatItems = [];
+        template.categories.forEach(cat => {
+            cat.items.forEach((item, idx) => {
+                if (item.key === itemKey) return;
+                flatItems.push({
+                    category: cat.name,
+                    doc_key: item.key,
+                    doc_label: item.name,
+                    is_mandatory: !!item.required,
+                    sort_order: idx
+                });
+            });
         });
-        setDocumentTemplates(updated);
-        localStorage.setItem('mano_document_templates', JSON.stringify(updated));
-        toast.success('Document item removed');
+
+        try {
+            await onboardingService.updateDocumentTemplate(templateId, {
+                template_name: template.name,
+                items: flatItems
+            });
+            await refreshDocTemplates();
+            toast.success('Document item removed');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to remove document item");
+            await refreshDocTemplates();
+        }
     };
 
-    const handleDeleteDocTemplate = (id) => {
+    const handleDeleteDocTemplate = async (id) => {
         if (documentTemplates.length <= 1) {
             toast.error('Cannot delete the last remaining template');
             return;
         }
-        const updated = documentTemplates.filter(t => t.id !== id);
-        setDocumentTemplates(updated);
-        localStorage.setItem('mano_document_templates', JSON.stringify(updated));
-        setSelectedDocTemplateId(updated[0].id);
-        toast.success('Document template deleted');
+        try {
+            await onboardingService.deleteDocumentTemplate(id);
+            const remaining = documentTemplates.filter(t => t.id !== id);
+            await refreshDocTemplates();
+            setSelectedDocTemplateId(remaining[0].id);
+            toast.success('Document template deleted');
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to delete document template");
+        }
     };
 
-    // Assigned Template Handlers
     const handleChecklistTemplateChange = (templateId) => {
-        const updatedProfile = {
-            ...selectedEmployee.profile,
-            checklist_template_id: templateId
-        };
-        saveEmployeeProfile(selectedEmployee.id, updatedProfile);
+        if (!selectedEmployee) return;
+
+        const currentChecklistTemplateId = selectedEmployee.checklist_template_id || onboardingData?.checklist_template_id;
+        if (templateId && currentChecklistTemplateId && String(templateId) === String(currentChecklistTemplateId)) {
+            return;
+        }
+
+        setConfirmModal({
+            isOpen: true,
+            title: "Change Checklist Template",
+            message: "WARNING: Changing the checklist template will permanently delete all current checklist progress for this employee. All completed and in-progress tasks will be lost. This action cannot be undone. Do you want to proceed?",
+            type: 'warning',
+            confirmText: "Change Template",
+            onConfirm: async () => {
+                try {
+                    setIsSubmitting(true);
+                    const currentDocTemplateId = selectedEmployee.document_template_id || onboardingData?.document_template_id;
+                    await onboardingService.assignTemplates(
+                        selectedEmployee.id,
+                        templateId || null,
+                        currentDocTemplateId || null
+                    );
+                    toast.success("Checklist template assigned successfully!");
+                    // Refresh employee data so the list has the updated IDs
+                    await fetchEmployees(selectedEmployee.id);
+                    await loadEmployeeOnboarding(selectedEmployee.id);
+                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                } catch (err) {
+                    console.error(err);
+                    toast.error("Failed to assign checklist template");
+                } finally {
+                    setIsSubmitting(false);
+                }
+            }
+        });
     };
 
     const handleDocumentTemplateChange = (templateId) => {
-        const updatedProfile = {
-            ...selectedEmployee.profile,
-            document_template_id: templateId
-        };
-        saveEmployeeProfile(selectedEmployee.id, updatedProfile);
+        if (!selectedEmployee) return;
+
+        const currentDocTemplateId = selectedEmployee.document_template_id || onboardingData?.document_template_id;
+        if (templateId && currentDocTemplateId && String(templateId) === String(currentDocTemplateId)) {
+            return;
+        }
+
+        setConfirmModal({
+            isOpen: true,
+            title: "Change Document Template",
+            message: "WARNING: Changing the document template will permanently delete all currently uploaded and verified documents for this employee from both storage (S3) and the database. All previous progress will be lost. This action cannot be undone. Do you want to proceed?",
+            type: 'danger',
+            confirmText: "Change Template",
+            onConfirm: async () => {
+                try {
+                    setIsSubmitting(true);
+                    const currentChecklistTemplateId = selectedEmployee.checklist_template_id || onboardingData?.checklist_template_id;
+                    await onboardingService.assignTemplates(
+                        selectedEmployee.id,
+                        currentChecklistTemplateId || null,
+                        templateId || null
+                    );
+                    toast.success("Document template assigned successfully!");
+                    // Refresh employee data so the list has the updated IDs
+                    await fetchEmployees(selectedEmployee.id);
+                    await loadEmployeeOnboarding(selectedEmployee.id);
+                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                } catch (err) {
+                    console.error(err);
+                    toast.error("Failed to assign document template");
+                } finally {
+                    setIsSubmitting(false);
+                }
+            }
+        });
     };
 
     // Employee-specific Exclusions Handlers
@@ -719,7 +1009,7 @@ const EmployeeUnifiedMaster = () => {
     };
 
     // Load extra profile info from localStorage or seed mock defaults
-    const getEmployeeProfile = (empId, empName) => {
+    const getEmployeeProfile = (empId, empName, checklistTemplateId = null, documentTemplateId = null) => {
         const localKey = `mano_empmaster_profile_${empId}`;
         const stored = localStorage.getItem(localKey);
         
@@ -811,24 +1101,26 @@ const EmployeeUnifiedMaster = () => {
                 }
             };
         } else if (variant === 1) {
-            // Case 1: In Progress Onboarding (~60% completed with warning flags)
+            // Case 1: Onboarding In-Progress (50% - 70%)
             defaultProfile = {
-                checklist_template_id: 'mgmt_onboarding',
-                document_template_id: 'mgmt_docs',
-                dob: '1998-11-23',
+                checklist_template_id: 'management_onboarding',
+                document_template_id: 'management_docs',
+                dob: '1995-11-23',
                 gender: 'Male',
-                address: 'H-90, Sector 15, HSR Layout, Bangalore, Karnataka',
-                joining_date: '2026-05-01',
+                address: 'Building 14, 5th Main, Koramangala, Bangalore, Karnataka',
+                joining_date: '2025-10-01',
                 employment_type: 'Full-time',
-                work_location: 'Remote',
-                reporting_manager: 'Ananya Sen (HR Specialist)',
+                work_location: 'Headquarters',
+                reporting_manager: 'Aditi Rao (HR Director)',
                 documents: {
-                    aadhaar: { uploaded: true, fileName: `Aadhaar_${empName.replace(/\s+/g, '_')}.pdf`, uploadedAt: '2026-05-02', nameOnDoc: empName, status: 'Verified' },
-                    pan: { uploaded: true, fileName: `PAN_${empName.replace(/\s+/g, '_')}.pdf`, uploadedAt: '2026-05-02', nameOnDoc: empName, status: 'Verified' },
-                    grad_degree: { uploaded: true, fileName: 'Degree_Certificate.pdf', uploadedAt: '2026-05-03', nameOnDoc: empName, status: 'Verified' }
+                    aadhaar: { uploaded: true, fileName: `Aadhaar_${empName.replace(/\s+/g, '_')}.pdf`, uploadedAt: '2025-09-28', nameOnDoc: empName, status: 'Verified' },
+                    pan: { uploaded: true, fileName: `PAN_${empName.replace(/\s+/g, '_')}.pdf`, uploadedAt: '2025-09-28', nameOnDoc: empName, status: 'Verified' },
+                    experience_letter: { uploaded: true, fileName: 'PrevCompany_Experience.pdf', uploadedAt: '2025-09-29', nameOnDoc: empName, status: 'Pending' },
+                    salary_slips: { uploaded: true, fileName: 'PaySlip_August2025.pdf', uploadedAt: '2025-09-29', nameOnDoc: empName, status: 'Verified' }
                 },
                 onboarding_checklist: {
                     personal_info: true,
+                    laptop_assigned: true,
                     hr_policy: true,
                     team_intro: true,
                     okr_alignment: false,
@@ -896,10 +1188,10 @@ const EmployeeUnifiedMaster = () => {
             try {
                 const parsed = JSON.parse(stored);
                 return {
-                    checklist_template_id: defaultProfile.checklist_template_id,
-                    document_template_id: defaultProfile.document_template_id,
                     ...defaultProfile,
                     ...parsed,
+                    checklist_template_id: checklistTemplateId !== null && checklistTemplateId !== undefined ? checklistTemplateId : (parsed.checklist_template_id || defaultProfile.checklist_template_id),
+                    document_template_id: documentTemplateId !== null && documentTemplateId !== undefined ? documentTemplateId : (parsed.document_template_id || defaultProfile.document_template_id),
                     documents: { ...defaultProfile.documents, ...parsed.documents },
                     onboarding_checklist: { ...defaultProfile.onboarding_checklist, ...parsed.onboarding_checklist },
                     ai_verification_results: { ...defaultProfile.ai_verification_results, ...parsed.ai_verification_results }
@@ -908,7 +1200,11 @@ const EmployeeUnifiedMaster = () => {
                 console.error(e);
             }
         }
-        return defaultProfile;
+        return {
+            ...defaultProfile,
+            checklist_template_id: checklistTemplateId !== null && checklistTemplateId !== undefined ? checklistTemplateId : defaultProfile.checklist_template_id,
+            document_template_id: documentTemplateId !== null && documentTemplateId !== undefined ? documentTemplateId : defaultProfile.document_template_id
+        };
     };
 
     const saveEmployeeProfile = (empId, updatedProfile) => {
@@ -936,7 +1232,7 @@ const EmployeeUnifiedMaster = () => {
             checklist = profileOrChecklist;
         }
 
-        const currentTemplates = checklistTemplates || DEFAULT_CHECKLIST_TEMPLATES;
+        const currentTemplates = checklistTemplates;
         const activeId = templateId || (currentTemplates[0]?.id);
         const template = currentTemplates.find(t => t.id === activeId) || currentTemplates[0];
         if (!template || !template.items || template.items.length === 0) return 0;
@@ -969,7 +1265,9 @@ const EmployeeUnifiedMaster = () => {
                     is_active: u.is_active,
                     is_deleted: u.is_deleted,
                     shift: u.shift_name || 'General Shift',
-                    workLocations: u.work_locations || []
+                    workLocations: u.work_locations || [],
+                    checklist_template_id: u.checklist_template_id,
+                    document_template_id: u.document_template_id
                 }));
                 setEmployees(updatedList);
             } else {
@@ -981,7 +1279,12 @@ const EmployeeUnifiedMaster = () => {
             if (selectedIdToRefresh) {
                 const freshEmp = updatedList.find(e => e.id === selectedIdToRefresh);
                 if (freshEmp) {
-                    const profile = getEmployeeProfile(freshEmp.id, freshEmp.name);
+                    const profile = getEmployeeProfile(
+                        freshEmp.id, 
+                        freshEmp.name, 
+                        freshEmp.checklist_template_id, 
+                        freshEmp.document_template_id
+                    );
                     setSelectedEmployee({
                         ...freshEmp,
                         profile
@@ -999,16 +1302,16 @@ const EmployeeUnifiedMaster = () => {
 
     useEffect(() => {
         fetchEmployees();
-        
-        const storedCycles = localStorage.getItem('mano_performance_cycles');
-        if (storedCycles) {
-            try {
-                setCycles(JSON.parse(storedCycles));
-            } catch (e) {
-                setCycles(DEFAULT_CYCLES);
-            }
-        }
+        refreshChecklistTemplates();
+        refreshDocTemplates();
+        refreshCycles();
     }, []);
+
+    useEffect(() => {
+        if (selectedEmployee?.id) {
+            loadEmployeeOnboarding(selectedEmployee.id);
+        }
+    }, [selectedEmployee?.id]);
 
     const departments = ['All', ...new Set(employees.map(e => e.department))];
 
@@ -1031,7 +1334,7 @@ const EmployeeUnifiedMaster = () => {
         const matchesStatus = emp.status === statusFilter;
         
         // Cards 2 & 3 Onboarding progress filter
-        const profile = getEmployeeProfile(emp.id, emp.name);
+        const profile = getEmployeeProfile(emp.id, emp.name, emp.checklist_template_id, emp.document_template_id);
         const progress = getOnboardingProgress(profile.onboarding_checklist, profile.checklist_template_id);
         let matchesOnboarding = true;
         
@@ -1045,7 +1348,7 @@ const EmployeeUnifiedMaster = () => {
     });
 
     const handleSelectEmployee = (emp) => {
-        const profile = getEmployeeProfile(emp.id, emp.name);
+        const profile = getEmployeeProfile(emp.id, emp.name, emp.checklist_template_id, emp.document_template_id);
         setSelectedEmployee({
             ...emp,
             profile
@@ -1155,86 +1458,81 @@ const EmployeeUnifiedMaster = () => {
     };
 
     // Checklist toggles
-    const handleChecklistToggle = (itemKey) => {
-        const currentChecklist = selectedEmployee.profile.onboarding_checklist;
-        const updatedChecklist = {
-            ...currentChecklist,
-            [itemKey]: !currentChecklist[itemKey]
-        };
+    const handleChecklistToggle = async (itemKey) => {
+        if (!selectedEmployee) return;
+        const currentItem = onboardingData.checklist_progress.find(p => p.task_key === itemKey);
+        const nextCompleted = currentItem ? !currentItem.is_completed : true;
 
-        const updatedProfile = {
-            ...selectedEmployee.profile,
-            onboarding_checklist: updatedChecklist
-        };
-
-        saveEmployeeProfile(selectedEmployee.id, updatedProfile);
+        try {
+            await onboardingService.toggleChecklistItem(selectedEmployee.id, itemKey, nextCompleted);
+            await loadEmployeeOnboarding(selectedEmployee.id);
+            toast.success("Checklist task updated");
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to update checklist task status");
+        }
     };
 
-    // Upload verified documents simulations
-    const openUploadModal = (itemKey, itemName, categoryId) => {
-        setUploadForm({
-            fileName: `${itemName.replace(/\s+/g, '_')}_Scan.pdf`,
-            expiryDate: '',
-            nameOnDoc: selectedEmployee.name,
-            isExpiredSim: false,
-            isMismatchSim: false
-        });
-        setUploadModal({
-            isOpen: true,
-            docKey: itemKey,
-            docName: itemName,
-            category: categoryId
-        });
-    };
+    // Upload verified documents
+    const handleDirectDocumentUpload = (itemKey, itemName) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
 
-    const handleDocumentUploadSave = (e) => {
-        e.preventDefault();
-        
-        const docRecord = {
-            uploaded: true,
-            fileName: uploadForm.fileName,
-            uploadedAt: new Date().toLocaleDateString(),
-            expiryDate: uploadForm.expiryDate || null,
-            nameOnDoc: uploadForm.nameOnDoc,
-            isExpiredSim: uploadForm.isExpiredSim,
-            isMismatchSim: uploadForm.isMismatchSim,
-            status: uploadForm.isExpiredSim ? 'Expired' : (uploadForm.isMismatchSim ? 'Mismatched' : 'Verified')
-        };
+            const formData = new FormData();
+            formData.append('employee_id', selectedEmployee.id);
+            formData.append('doc_key', itemKey);
+            formData.append('file', file);
 
-        const updatedDocs = {
-            ...selectedEmployee.profile.documents,
-            [uploadModal.docKey]: docRecord
-        };
-
-        const hasAadhaar = updatedDocs['aadhaar']?.uploaded;
-        const hasPan = updatedDocs['pan']?.uploaded;
-        const autoCheckDocs = (hasAadhaar && hasPan);
-
-        const updatedProfile = {
-            ...selectedEmployee.profile,
-            documents: updatedDocs,
-            onboarding_checklist: {
-                ...selectedEmployee.profile.onboarding_checklist,
-                docs_submitted: autoCheckDocs ? true : selectedEmployee.profile.onboarding_checklist.docs_submitted
+            try {
+                toast.loading(`Uploading ${itemName}...`, { id: 'upload_toast' });
+                await onboardingService.uploadDocument(formData);
+                await loadEmployeeOnboarding(selectedEmployee.id);
+                toast.success(`Uploaded ${itemName} successfully!`, { id: 'upload_toast' });
+            } catch (error) {
+                console.error(error);
+                toast.error(error.message || `Failed to upload ${itemName}`, { id: 'upload_toast' });
             }
         };
-
-        saveEmployeeProfile(selectedEmployee.id, updatedProfile);
-        setUploadModal(prev => ({ ...prev, isOpen: false }));
-        toast.success(`Uploaded ${uploadModal.docName} successfully!`);
+        input.click();
     };
 
-    const handleDeleteDocument = (docKey, docName) => {
-        const updatedDocs = { ...selectedEmployee.profile.documents };
-        delete updatedDocs[docKey];
+    const handleDeleteDocument = async (docId, docName) => {
+        try {
+            await onboardingService.deleteDocument(docId);
+            await loadEmployeeOnboarding(selectedEmployee.id);
+            toast.info(`Removed ${docName}`);
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to delete document");
+        }
+    };
 
-        const updatedProfile = {
-            ...selectedEmployee.profile,
-            documents: updatedDocs
-        };
+    const handleViewDocument = async (docId) => {
+        try {
+            const res = await onboardingService.getDocumentUrl(docId);
+            if (res.success && res.url) {
+                window.open(res.url, '_blank');
+            } else {
+                toast.error("Failed to fetch pre-signed URL");
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to retrieve document view link");
+        }
+    };
 
-        saveEmployeeProfile(selectedEmployee.id, updatedProfile);
-        toast.info(`Removed ${docName}`);
+    const handleVerifyDocument = async (docId, status, comments = '') => {
+        try {
+            await onboardingService.verifyDocument(docId, status, comments);
+            await loadEmployeeOnboarding(selectedEmployee.id);
+            toast.success(`Document marked as ${status}`);
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to update verification status");
+        }
     };
 
     // AI Auditor Scan Simulations
@@ -1255,23 +1553,29 @@ const EmployeeUnifiedMaster = () => {
                 category.items?.forEach(item => {
                     if (docExclusions.includes(item.key)) return; // Skip excluded document fields
 
-                    const doc = selectedEmployee.profile.documents[item.key];
-                    if (item.required && (!doc || !doc.uploaded)) {
+                    const uploadedDoc = onboardingData.uploaded_documents.find(d => d.doc_key === item.key);
+                    const legacyDoc = selectedEmployee.profile.documents?.[item.key];
+                    const hasDoc = uploadedDoc || legacyDoc?.uploaded;
+
+                    if (item.required && !hasDoc) {
                         missing.push(item.name);
-                    } else if (doc && doc.uploaded) {
-                        if (doc.expiryDate && new Date(doc.expiryDate) < new Date()) {
-                            expired.push(`${item.name} (Expired on ${doc.expiryDate})`);
-                            doc.status = 'Expired';
+                    } else if (hasDoc) {
+                        const expiryDate = legacyDoc?.expiryDate || (uploadedDoc ? '2030-05-15' : null);
+                        const nameOnDoc = legacyDoc?.nameOnDoc || (uploadedDoc ? selectedEmployee.name : null);
+
+                        if (expiryDate && new Date(expiryDate) < new Date()) {
+                            expired.push(`${item.name} (Expired on ${expiryDate})`);
+                            if (legacyDoc) legacyDoc.status = 'Expired';
                         }
-                        if (doc.isExpiredSim) {
+                        if (legacyDoc?.isExpiredSim) {
                             expired.push(`${item.name} (Simulated Expiration error)`);
                         }
-                        if (doc.nameOnDoc && doc.nameOnDoc.trim().toLowerCase() !== selectedEmployee.name.trim().toLowerCase()) {
-                            mismatched.push(`${item.name} lists name "${doc.nameOnDoc}" instead of "${selectedEmployee.name}"`);
-                            doc.status = 'Mismatched';
+                        if (nameOnDoc && nameOnDoc.trim().toLowerCase() !== selectedEmployee.name.trim().toLowerCase()) {
+                            mismatched.push(`${item.name} lists name "${nameOnDoc}" instead of "${selectedEmployee.name}"`);
+                            if (legacyDoc) legacyDoc.status = 'Mismatched';
                         }
-                        if (doc.isMismatchSim) {
-                            mismatched.push(`${item.name} lists name "${doc.nameOnDoc}" instead of "${selectedEmployee.name}"`);
+                        if (legacyDoc?.isMismatchSim) {
+                            mismatched.push(`${item.name} lists name "${legacyDoc.nameOnDoc}" instead of "${selectedEmployee.name}"`);
                         }
                     }
                 });
@@ -1291,11 +1595,17 @@ const EmployeeUnifiedMaster = () => {
             categories.forEach(category => {
                 category.items?.forEach(item => {
                     if (docExclusions.includes(item.key)) return;
-                    const doc = selectedEmployee.profile.documents[item.key];
-                    if (doc && doc.uploaded) {
+                    const uploadedDoc = onboardingData.uploaded_documents.find(d => d.doc_key === item.key);
+                    const legacyDoc = selectedEmployee.profile.documents?.[item.key];
+                    const hasDoc = uploadedDoc || legacyDoc?.uploaded;
+
+                    if (hasDoc) {
+                        const expiryDate = legacyDoc?.expiryDate || (uploadedDoc ? '2030-05-15' : null);
+                        const nameOnDoc = legacyDoc?.nameOnDoc || (uploadedDoc ? selectedEmployee.name : null);
+
                         if (item.key === 'aadhaar') {
                             extractedMetadata.aadhaar = [
-                                { field: 'Extracted Name', value: doc.nameOnDoc || hrName, confidence: 99 },
+                                { field: 'Extracted Name', value: nameOnDoc || hrName, confidence: 99 },
                                 { field: 'Aadhaar Number', value: 'XXXX-XXXX-8901', confidence: 99 },
                                 { field: 'Date of Birth', value: hrDob, confidence: 98 },
                                 { field: 'Gender', value: hrGender, confidence: 99 },
@@ -1304,14 +1614,14 @@ const EmployeeUnifiedMaster = () => {
                             securityChecks.aadhaar = { hologram: 'Passed', blur: 0.08, metadata: 'Passed', editing: 'Passed' };
                         } else if (item.key === 'pan') {
                             extractedMetadata.pan = [
-                                { field: 'Extracted Name', value: (doc.nameOnDoc || hrName).toUpperCase(), confidence: 97 },
+                                { field: 'Extracted Name', value: (nameOnDoc || hrName).toUpperCase(), confidence: 97 },
                                 { field: 'PAN Number', value: 'ABCDE1234F', confidence: 99 },
                                 { field: 'Date of Birth', value: hrDob, confidence: 98 },
                                 { field: 'Father\'s Name', value: 'K. Suresh', confidence: 90 }
                             ];
                             securityChecks.pan = { hologram: 'Passed', blur: 0.11, metadata: 'Passed', editing: 'Passed' };
                         } else if (item.key === 'grad_degree' || item.key === 'degree') {
-                            const degreeName = doc.nameOnDoc || (hrName.split(' ')[0] + ' V.');
+                            const degreeName = nameOnDoc || (hrName.split(' ')[0] + ' V.');
                             extractedMetadata[item.key] = [
                                 { field: 'Extracted Name', value: degreeName, confidence: 94 },
                                 { field: 'Degree Type', value: 'Bachelor of Technology', confidence: 98 },
@@ -1339,15 +1649,15 @@ const EmployeeUnifiedMaster = () => {
                             });
                         } else if (item.key === 'passport') {
                             extractedMetadata.passport = [
-                                { field: 'Extracted Name', value: doc.nameOnDoc || hrName, confidence: 99 },
+                                { field: 'Extracted Name', value: nameOnDoc || hrName, confidence: 99 },
                                 { field: 'Passport Number', value: 'Z9876543', confidence: 99 },
-                                { field: 'Expiry Date', value: doc.expiryDate || '2030-05-15', confidence: 99 },
+                                { field: 'Expiry Date', value: expiryDate || '2030-05-15', confidence: 99 },
                                 { field: 'Nationality', value: 'Indian', confidence: 99 }
                             ];
                             securityChecks.passport = { hologram: 'Passed', blur: 0.05, metadata: 'Passed', editing: 'Passed' };
                         } else if (item.key === 'experience_letter') {
                             extractedMetadata.experience_letter = [
-                                { field: 'Extracted Name', value: doc.nameOnDoc || hrName, confidence: 96 },
+                                { field: 'Extracted Name', value: nameOnDoc || hrName, confidence: 96 },
                                 { field: 'Employer Name', value: 'PPL Solutions Pvt Ltd', confidence: 98 },
                                 { field: 'Designation', value: 'Software Engineer', confidence: 95 },
                                 { field: 'Tenure', value: '2 Years (2022 - 2024)', confidence: 92 }
@@ -1355,7 +1665,7 @@ const EmployeeUnifiedMaster = () => {
                             securityChecks.experience_letter = { hologram: 'N/A', blur: 0.12, metadata: 'Passed', editing: 'Passed' };
                         } else {
                             extractedMetadata[item.key] = [
-                                { field: 'Extracted Name', value: doc.nameOnDoc || hrName, confidence: 95 },
+                                { field: 'Extracted Name', value: nameOnDoc || hrName, confidence: 95 },
                                 { field: 'Document Status', value: 'Uploaded & Parsed', confidence: 90 }
                             ];
                             securityChecks[item.key] = { hologram: 'N/A', blur: 0.10, metadata: 'Passed', editing: 'Passed' };
@@ -2222,12 +2532,17 @@ const EmployeeUnifiedMaster = () => {
 
                                 {/* 2. Onboarding Checklist Tab */}
                                 {drawerTab === 'checklist' && (() => {
-                                    const activeTemplateId = selectedEmployee.profile.checklist_template_id || (checklistTemplates[0]?.id || '');
-                                    const activeTemplate = checklistTemplates.find(t => t.id === activeTemplateId) || checklistTemplates[0];
-                                    const rawItems = activeTemplate?.items || [];
+                                    const activeTemplateId = onboardingData.checklist_template_id || (checklistTemplates[0]?.id || '');
+                                    const rawItems = onboardingData.checklist_items || [];
                                     const exclusions = selectedEmployee.profile.checklist_exclusions || [];
-                                    const items = rawItems.filter(item => !exclusions.includes(item.key));
+                                    const items = rawItems.filter(item => !exclusions.includes(item.task_key));
                                     
+                                    const totalTasks = items.length;
+                                    const completedTasks = onboardingData.checklist_progress.filter(
+                                        p => p.is_completed && rawItems.some(item => item.task_key === p.task_key && !exclusions.includes(item.task_key))
+                                    ).length;
+                                    const rate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
                                     return (
                                         <div className="space-y-4">
                                             {/* Template assignment & header */}
@@ -2247,7 +2562,7 @@ const EmployeeUnifiedMaster = () => {
                                                 <div className="sm:text-right flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto">
                                                     <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 dark:text-github-dark-muted block">Completion Rate</span>
                                                     <span className="text-xs font-extrabold text-slate-800 dark:text-github-dark-text mt-0.5">
-                                                        {getOnboardingProgress(selectedEmployee.profile, activeTemplateId)}%
+                                                        {rate}%
                                                     </span>
                                                 </div>
                                             </div>
@@ -2271,23 +2586,24 @@ const EmployeeUnifiedMaster = () => {
                                                     </div>
                                                 ) : (
                                                     items.map((item) => {
-                                                        const isDone = !!selectedEmployee.profile.onboarding_checklist[item.key];
+                                                        const progressLog = onboardingData.checklist_progress.find(p => p.task_key === item.task_key);
+                                                        const isDone = !!progressLog?.is_completed;
                                                         return (
                                                             <div 
-                                                                key={item.key} 
-                                                                onClick={() => handleChecklistToggle(item.key)}
+                                                                key={item.task_key} 
+                                                                onClick={() => handleChecklistToggle(item.task_key)}
                                                                 className="flex items-center justify-between p-3 bg-slate-50 dark:bg-github-dark-subtle/10 border border-slate-100 dark:border-github-dark-border rounded-xl cursor-pointer hover:bg-slate-100/50 dark:hover:bg-slate-800/20 transition-all select-none group/row"
                                                             >
                                                                 <div className="flex items-center gap-3">
                                                                     <CheckCircle2 size={18} className={isDone ? "text-emerald-500" : "text-slate-300 dark:text-slate-750"} />
                                                                     <span className={`font-semibold text-xs ${isDone ? 'text-slate-400 line-through opacity-70' : 'text-slate-800 dark:text-github-dark-text'}`}>
-                                                                        {item.label}
+                                                                        {item.task_label}
                                                                     </span>
                                                                 </div>
                                                                 <button
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
-                                                                        handleExcludeChecklistItem(item.key);
+                                                                        handleExcludeChecklistItem(item.task_key);
                                                                     }}
                                                                     className="opacity-0 group-hover/row:opacity-100 p-1 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400 hover:text-red-500 rounded transition-all"
                                                                     title="Exclude task for this employee"
@@ -2305,11 +2621,24 @@ const EmployeeUnifiedMaster = () => {
 
                                 {/* 3. Document Files Tab */}
                                 {drawerTab === 'documents' && (() => {
-                                    const activeDocTemplateId = selectedEmployee.profile.document_template_id || (documentTemplates[0]?.id || '');
-                                    const activeDocTemplate = documentTemplates.find(t => t.id === activeDocTemplateId) || documentTemplates[0];
-                                    const categories = activeDocTemplate?.categories || [];
+                                    const activeDocTemplateId = onboardingData.document_template_id || (documentTemplates[0]?.id || '');
                                     const exclusions = selectedEmployee.profile.document_exclusions || [];
                                     
+                                    // Construct categories map from flat required documents list
+                                    const categoriesMap = {};
+                                    (onboardingData.required_documents || []).forEach(reqDoc => {
+                                        if (!categoriesMap[reqDoc.category]) {
+                                            categoriesMap[reqDoc.category] = { id: reqDoc.category, name: reqDoc.category, items: [] };
+                                        }
+                                        categoriesMap[reqDoc.category].items.push({
+                                            key: reqDoc.doc_key,
+                                            name: reqDoc.doc_label,
+                                            required: !!reqDoc.is_mandatory
+                                        });
+                                    });
+                                    const categories = Object.values(categoriesMap);
+                                    const isAdminOrHr = currentUser?.user_type === 'admin' || currentUser?.user_type === 'hr';
+
                                     return (
                                         <div className="space-y-6">
                                             {/* Template assignment & header */}
@@ -2347,7 +2676,7 @@ const EmployeeUnifiedMaster = () => {
                                                 ) : (
                                                     categories.map((cat) => {
                                                         const activeItems = cat.items?.filter(item => !exclusions.includes(item.key)) || [];
-                                                        if (activeItems.length === 0 && (cat.items || []).length > 0) return null; // skip category if all items are excluded
+                                                        if (activeItems.length === 0 && (cat.items || []).length > 0) return null;
                                                         return (
                                                             <div key={cat.id} className="space-y-2 bg-slate-50/50 dark:bg-[#161b22]/10 border border-slate-155/40 dark:border-github-dark-border p-4 rounded-xl">
                                                                 <h5 className="font-bold text-[10px] uppercase text-indigo-500 tracking-wider mb-2">{cat.name}</h5>
@@ -2356,8 +2685,8 @@ const EmployeeUnifiedMaster = () => {
                                                                         <div className="text-slate-405 italic text-xs py-2 col-span-2">No files configured in this category.</div>
                                                                     ) : (
                                                                         activeItems.map((item) => {
-                                                                            const doc = selectedEmployee.profile.documents[item.key];
-                                                                            const isUploaded = !!doc?.uploaded;
+                                                                            const doc = onboardingData.uploaded_documents.find(d => d.doc_key === item.key);
+                                                                            const isUploaded = !!doc;
                                                                             
                                                                             return (
                                                                                 <div key={item.key} className="flex justify-between items-center p-3 bg-white dark:bg-[#161b22]/30 border border-slate-200/60 dark:border-github-dark-border rounded-lg shadow-sm group/docrow">
@@ -2368,7 +2697,12 @@ const EmployeeUnifiedMaster = () => {
                                                                                                 {item.name} {item.required && <span className="text-red-500">*</span>}
                                                                                             </p>
                                                                                             {isUploaded ? (
-                                                                                                <p className="text-[9px] text-slate-400 font-medium font-mono truncate">{doc.fileName}</p>
+                                                                                                <>
+                                                                                                    <p className="text-[9px] text-slate-400 font-medium font-mono truncate">{doc.file_name}</p>
+                                                                                                    {doc.verification_comments && (
+                                                                                                        <p className="text-[9px] text-red-500 italic mt-0.5">Reason: {doc.verification_comments}</p>
+                                                                                                    )}
+                                                                                                </>
                                                                                             ) : (
                                                                                                 <p className="text-[9px] text-slate-400 italic">Not submitted</p>
                                                                                             )}
@@ -2379,12 +2713,44 @@ const EmployeeUnifiedMaster = () => {
                                                                                         {isUploaded ? (
                                                                                             <>
                                                                                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase ${
-                                                                                                    doc.status === 'Verified' ? 'bg-emerald-50 text-emerald-650 dark:bg-emerald-950/20' : 'bg-red-50 text-red-650 dark:bg-red-950/20'
+                                                                                                    doc.verified_status === 'Verified' ? 'bg-emerald-50 text-emerald-650 dark:bg-emerald-950/20' : 
+                                                                                                    doc.verified_status === 'Rejected' ? 'bg-red-50 text-red-650 dark:bg-red-950/20' :
+                                                                                                    'bg-amber-50 text-amber-650 dark:bg-amber-950/20'
                                                                                                 }`}>
-                                                                                                    {doc.status}
+                                                                                                    {doc.verified_status}
                                                                                                 </span>
                                                                                                 <button 
-                                                                                                    onClick={() => handleDeleteDocument(item.key, item.name)}
+                                                                                                    onClick={() => handleViewDocument(doc.id)}
+                                                                                                    className="p-1 hover:bg-slate-105 text-slate-400 hover:text-indigo-500 rounded"
+                                                                                                    title="Download/View file"
+                                                                                                >
+                                                                                                    <Eye size={13} />
+                                                                                                </button>
+                                                                                                {isAdminOrHr && doc.verified_status !== 'Verified' && (
+                                                                                                    <button 
+                                                                                                        onClick={() => handleVerifyDocument(doc.id, 'Verified')}
+                                                                                                        className="p-1 hover:bg-emerald-50 text-emerald-600 rounded"
+                                                                                                        title="Verify/Approve Document"
+                                                                                                    >
+                                                                                                        <Check size={13} />
+                                                                                                    </button>
+                                                                                                )}
+                                                                                                {isAdminOrHr && doc.verified_status !== 'Rejected' && (
+                                                                                                    <button 
+                                                                                                        onClick={() => {
+                                                                                                            const reason = prompt("Enter rejection reason:");
+                                                                                                            if (reason !== null) {
+                                                                                                                handleVerifyDocument(doc.id, 'Rejected', reason);
+                                                                                                            }
+                                                                                                        }}
+                                                                                                        className="p-1 hover:bg-red-50 text-red-600 rounded"
+                                                                                                        title="Reject Document"
+                                                                                                    >
+                                                                                                        <X size={13} />
+                                                                                                    </button>
+                                                                                                )}
+                                                                                                <button 
+                                                                                                    onClick={() => handleDeleteDocument(doc.id, item.name)}
                                                                                                     className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-500 rounded"
                                                                                                     title="Delete uploaded file"
                                                                                                 >
@@ -2393,7 +2759,7 @@ const EmployeeUnifiedMaster = () => {
                                                                                             </>
                                                                                         ) : (
                                                                                             <button 
-                                                                                                onClick={() => openUploadModal(item.key, item.name, cat.id)}
+                                                                                                onClick={() => handleDirectDocumentUpload(item.key, item.name)}
                                                                                                 className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-1 bg-slate-50 dark:bg-github-dark-subtle/50 rounded border border-slate-200 dark:border-github-dark-border"
                                                                                             >
                                                                                                 <Upload size={10} />
@@ -2404,7 +2770,7 @@ const EmployeeUnifiedMaster = () => {
                                                                                         {/* Exclude file field button */}
                                                                                         <button 
                                                                                             onClick={() => handleExcludeDocItem(item.key)}
-                                                                                            className="opacity-0 group-hover/docrow:opacity-100 p-1 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-550 rounded"
+                                                                                            className="opacity-0 group-hover/docrow:opacity-100 p-1 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-555 rounded"
                                                                                             title="Exclude document field for this employee"
                                                                                         >
                                                                                             <X size={13} />
@@ -2871,87 +3237,6 @@ const EmployeeUnifiedMaster = () => {
                 )}
             </AnimatePresence>
 
-            {/* DOCUMENT UPLOAD SIMULATION MODAL */}
-            {uploadModal.isOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-                    <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150">
-                        <div className="flex justify-between items-center p-4 border-b border-slate-155 dark:border-github-dark-border">
-                            <h4 className="font-bold text-sm text-slate-800 dark:text-github-dark-text">Upload {uploadModal.docName}</h4>
-                            <button onClick={() => setUploadModal(prev => ({ ...prev, isOpen: false }))} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
-                        </div>
-                        <form onSubmit={handleDocumentUploadSave} className="p-4 space-y-4 text-xs">
-                            <div>
-                                <label className="block text-slate-450 font-semibold mb-1">File Name</label>
-                                <input 
-                                    type="text" 
-                                    value={uploadForm.fileName}
-                                    onChange={(e) => setUploadForm({ ...uploadForm, fileName: e.target.value })}
-                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-github-dark-subtle/40 border border-slate-250 dark:border-github-dark-border rounded focus:outline-none focus:border-indigo-500" 
-                                    required 
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-slate-450 font-semibold mb-1">Name Printed On Document</label>
-                                <input 
-                                    type="text" 
-                                    value={uploadForm.nameOnDoc}
-                                    onChange={(e) => setUploadForm({ ...uploadForm, nameOnDoc: e.target.value })}
-                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-github-dark-subtle/40 border border-slate-250 dark:border-github-dark-border rounded focus:outline-none" 
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-slate-450 font-semibold mb-1">Expiry Date (Optional)</label>
-                                <input 
-                                    type="date" 
-                                    value={uploadForm.expiryDate}
-                                    onChange={(e) => setUploadForm({ ...uploadForm, expiryDate: e.target.value })}
-                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-github-dark-subtle/40 border border-slate-250 dark:border-github-dark-border rounded focus:outline-none" 
-                                />
-                            </div>
-
-                            {/* Simulation error toggles */}
-                            <div className="pt-2 border-t border-slate-100 dark:border-github-dark-border space-y-2 bg-indigo-50/20 dark:bg-indigo-950/10 p-3 rounded-lg">
-                                <span className="block font-bold text-[9px] uppercase tracking-wider text-indigo-500">AI auditor simulations</span>
-                                <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-600 dark:text-github-dark-muted">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={uploadForm.isExpiredSim}
-                                        onChange={(e) => setUploadForm({ ...uploadForm, isExpiredSim: e.target.checked })}
-                                        className="rounded text-indigo-600 focus:ring-0 w-3.5 h-3.5"
-                                    />
-                                    <span>Simulate Expired Document Warning</span>
-                                </label>
-                                <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-600 dark:text-github-dark-muted">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={uploadForm.isMismatchSim}
-                                        onChange={(e) => setUploadForm({ ...uploadForm, isMismatchSim: e.target.checked })}
-                                        className="rounded text-indigo-600 focus:ring-0 w-3.5 h-3.5"
-                                    />
-                                    <span>Simulate Spelling Name Mismatch warning</span>
-                                </label>
-                            </div>
-
-                            <div className="flex gap-3 pt-2">
-                                <button 
-                                    type="button" 
-                                    onClick={() => setUploadModal(prev => ({ ...prev, isOpen: false }))}
-                                    className="flex-1 px-4 py-2.5 font-bold uppercase tracking-wider text-slate-500 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 rounded-lg text-center"
-                                >
-                                    Cancel
-                                </button>
-                                <button 
-                                    type="submit" 
-                                    className="flex-1 px-4 py-2.5 font-bold uppercase tracking-wider text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg text-center"
-                                >
-                                    Confirm Upload
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
             {/* TEMPLATES CONFIGURATION MODAL */}
             {showTemplatesModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -3116,8 +3401,16 @@ const EmployeeUnifiedMaster = () => {
                                                     <label className="block text-[10px] uppercase font-black text-slate-400 dark:text-github-dark-muted mb-1.5">Template Name</label>
                                                     <input
                                                         type="text"
-                                                        value={template.name}
-                                                        onChange={(e) => handleUpdateChecklistTemplateName(template.id, e.target.value)}
+                                                        value={tempChecklistId === template.id ? tempChecklistName : (template.name || '')}
+                                                        onChange={(e) => {
+                                                            setTempChecklistId(template.id);
+                                                            setTempChecklistName(e.target.value);
+                                                        }}
+                                                        onBlur={() => {
+                                                            if (tempChecklistId === template.id && tempChecklistName.trim() !== '' && tempChecklistName !== template.name) {
+                                                                handleUpdateChecklistTemplateName(template.id, tempChecklistName.trim());
+                                                            }
+                                                        }}
                                                         className="w-full bg-slate-50 dark:bg-github-dark-subtle/50 border border-slate-200 dark:border-github-dark-border px-3.5 py-2 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                                     />
                                                 </div>
@@ -3202,8 +3495,16 @@ const EmployeeUnifiedMaster = () => {
                                                     <label className="block text-[10px] uppercase font-black text-slate-400 dark:text-github-dark-muted mb-1.5">Template Name</label>
                                                     <input
                                                         type="text"
-                                                        value={template.name}
-                                                        onChange={(e) => handleUpdateDocTemplateName(template.id, e.target.value)}
+                                                        value={tempDocId === template.id ? tempDocName : (template.name || '')}
+                                                        onChange={(e) => {
+                                                            setTempDocId(template.id);
+                                                            setTempDocName(e.target.value);
+                                                        }}
+                                                        onBlur={() => {
+                                                            if (tempDocId === template.id && tempDocName.trim() !== '' && tempDocName !== template.name) {
+                                                                handleUpdateDocTemplateName(template.id, tempDocName.trim());
+                                                            }
+                                                        }}
                                                         className="w-full bg-slate-50 dark:bg-github-dark-subtle/50 border border-slate-200 dark:border-github-dark-border px-3.5 py-2 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                                     />
                                                 </div>
@@ -3243,7 +3544,19 @@ const EmployeeUnifiedMaster = () => {
                                                         template.categories?.map((cat) => (
                                                             <div key={cat.id} className="border border-slate-200 dark:border-github-dark-border p-4 rounded-xl space-y-3 bg-slate-50/20 dark:bg-[#161b22]/10">
                                                                 <div className="flex justify-between items-center pb-2 border-b border-slate-150/60 dark:border-github-dark-border">
-                                                                    <span className="font-bold text-indigo-650 dark:text-indigo-400 uppercase text-[10px] tracking-wider">{cat.name}</span>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={editingCategoryNames[cat.id] !== undefined ? editingCategoryNames[cat.id] : cat.name}
+                                                                        onChange={(e) => setEditingCategoryNames({ ...editingCategoryNames, [cat.id]: e.target.value })}
+                                                                        onBlur={() => handleRenameDocTemplateCategory(template.id, cat.id, editingCategoryNames[cat.id])}
+                                                                        onKeyDown={(e) => {
+                                                                            if (e.key === 'Enter') {
+                                                                                e.target.blur();
+                                                                            }
+                                                                        }}
+                                                                        className="bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none font-bold text-indigo-650 dark:text-indigo-400 uppercase text-[10px] tracking-wider py-0.5 px-1 w-2/3"
+                                                                        placeholder="Category Name"
+                                                                    />
                                                                     <button
                                                                         onClick={() => {
                                                                             if (confirm(`Delete category "${cat.name}"? This removes all file fields inside it.`)) {
@@ -3343,8 +3656,16 @@ const EmployeeUnifiedMaster = () => {
                                                      <label className="block text-[10px] uppercase font-black text-slate-400 dark:text-github-dark-muted mb-1.5">Cycle Name</label>
                                                      <input
                                                          type="text"
-                                                         value={cycle.name}
-                                                         onChange={(e) => handleUpdateCycleField(cycle.id, 'name', e.target.value)}
+                                                         value={tempCycleId === cycle.id ? tempCycleName : (cycle.name || '')}
+                                                         onChange={(e) => {
+                                                             setTempCycleId(cycle.id);
+                                                             setTempCycleName(e.target.value);
+                                                         }}
+                                                         onBlur={() => {
+                                                             if (tempCycleId === cycle.id && tempCycleName.trim() !== '' && tempCycleName !== cycle.name) {
+                                                                 handleUpdateCycleField(cycle.id, 'name', tempCycleName.trim());
+                                                             }
+                                                         }}
                                                          className="w-full bg-slate-50 dark:bg-github-dark-subtle/50 border border-slate-200 dark:border-github-dark-border px-3.5 py-2 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                                      />
                                                  </div>

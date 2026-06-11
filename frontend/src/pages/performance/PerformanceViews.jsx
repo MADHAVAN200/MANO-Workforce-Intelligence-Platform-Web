@@ -2,90 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Award, FileText, Sparkles, CheckCircle2, Check, RefreshCw, User, AlertCircle, Star, Printer, TrendingUp, TrendingDown, ShieldCheck, Activity, Layers, Calendar, ChevronRight, XCircle } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { motion } from 'framer-motion';
+import { performanceGoalService } from '../../services/performanceGoalService';
+import { onboardingService } from '../../services/onboardingService';
 
-// HELPER: Fetch goals for an employee & cycle
-const getEmployeeGoalsFromStorage = (empId, cycleId) => {
-    const localKey = `mano_perf_goals_${empId}_${cycleId}`;
-    const stored = localStorage.getItem(localKey);
-    
-    const variant = Number(empId) % 3;
-    let defaultGoals = [];
-
-    if (variant === 0) {
-        defaultGoals = [
-            { id: 'g-1', title: 'Complete Core Module Sprint Tasks', deadline: '2026-06-15', status: 'Completed', rating: 9, comments: 'Delivered all geofencing modules on time.' },
-            { id: 'g-2', title: 'Achieve 95% Bug Resolution within SLA', deadline: '2026-06-20', status: 'Completed', rating: 8, comments: 'Resolved critical blocker tickets inside SLA limits.' },
-            { id: 'g-3', title: 'Refactor Legacy Code and reduce smells', deadline: '2026-06-30', status: 'Completed', rating: 9, comments: 'Cleaned up CSS variables and reduced build sizes.' }
-        ];
-    } else if (variant === 1) {
-        defaultGoals = [
-            { id: 'g-1', title: 'Review and fix CSS scaling on tablet screens', deadline: '2026-06-15', status: 'Completed', rating: 7, comments: 'Fixed layout queries, but took extra time.' },
-            { id: 'g-2', title: 'Conduct user feedback sessions for DAR logging', deadline: '2026-06-20', status: 'In-Progress', rating: 0, comments: '' },
-            { id: 'g-3', title: 'Improve unit test coverage by 15%', deadline: '2026-06-30', status: 'Pending', rating: 0, comments: '' }
-        ];
-    } else {
-        defaultGoals = [
-            { id: 'g-1', title: 'Complete compliance training courses', deadline: '2026-06-10', status: 'Pending', rating: 0, comments: '' },
-            { id: 'g-2', title: 'Update API endpoint error handling structures', deadline: '2026-06-25', status: 'In-Progress', rating: 0, comments: '' }
-        ];
-    }
-
-    if (stored) {
-        try {
-            return JSON.parse(stored);
-        } catch (e) {
-            console.error(e);
-        }
-    }
-    return defaultGoals;
-};
-
-// HELPER: Fetch review data
-const getEmployeeReviewFromStorage = (empId, cycleId) => {
-    const localKey = `mano_perf_review_${empId}_${cycleId}`;
-    const stored = localStorage.getItem(localKey);
-
-    const variant = Number(empId) % 3;
-    let defaultReview = {};
-
-    if (variant === 0) {
-        defaultReview = {
-            selfAchievements: 'Delivered the attendance logging geofencing module ahead of the sprint timeline and verified all check-in edge cases. Mentored two interns.',
-            selfChallenges: 'Faced layout scaling problems on specific tablet screen queries, but resolved them by refactoring index.css layout classes.',
-            selfLearning: 'Learned HSL color palette designs, advanced Socket.io logic, and local storage state sync layouts.',
-            managerComments: 'Consistently check-in on time. Excelled at frontend delivery. Suresh has shown superior engineering quality and was a great mentor this cycle.',
-            managerRec: 'Promote to Senior Role',
-            lastUpdated: '2026-06-05 11:10:00'
-        };
-    } else if (variant === 1) {
-        defaultReview = {
-            selfAchievements: 'Resolved CSS scaling query errors and updated client pages. Set up active DAR notifications.',
-            selfChallenges: 'Struggled with unit testing frameworks configuration due to legacy mock setup libraries.',
-            selfLearning: 'Learned CSS flexbox grid layouts and Jest mock testing suites.',
-            managerComments: 'Good work on UI modifications. Need to show more speed in test cases and complete pending goals.',
-            managerRec: 'Retain with Standard Increment',
-            lastUpdated: '2026-06-05 13:40:00'
-        };
-    } else {
-        defaultReview = {
-            selfAchievements: 'Started refactoring error check routes in backend API systems.',
-            selfChallenges: 'Faced frequent connectivity and local check-in deployment blockers.',
-            selfLearning: 'Read express API routing documentation and basic node crash logs.',
-            managerComments: 'Appraisal progress has been slow. Check-in records have also been irregular this quarter. Needs to show improvement in sprint velocity.',
-            managerRec: 'Retain with Performance Improvement Plan',
-            lastUpdated: '2026-06-05 16:20:00'
-        };
-    }
-
-    if (stored) {
-        try {
-            return JSON.parse(stored);
-        } catch (e) {
-            console.error(e);
-        }
-    }
-    return defaultReview;
-};
 
 // =====================================================================
 // CONSOLIDATED PerformanceHub COMPONENT
@@ -94,6 +13,7 @@ export const PerformanceHub = ({ employee, selectedCycleId }) => {
     const [goals, setGoals] = useState([]);
     const [review, setReview] = useState(null);
     const [newGoalForm, setNewGoalForm] = useState({ title: '', deadline: '' });
+    const [currentCycle, setCurrentCycle] = useState(null);
     
     // Rating / Recommendation state
     const [comments, setComments] = useState('');
@@ -105,87 +25,160 @@ export const PerformanceHub = ({ employee, selectedCycleId }) => {
     const [goalCommentsInput, setGoalCommentsInput] = useState('');
 
     useEffect(() => {
-        if (employee?.id) {
-            setGoals(getEmployeeGoalsFromStorage(employee.id, selectedCycleId));
-            const rev = getEmployeeReviewFromStorage(employee.id, selectedCycleId);
-            setReview(rev);
-            setComments(rev.managerComments || '');
-            setRec(rev.managerRec || 'Retain with Standard Increment');
-            setEditingGoalId(null);
-        }
+        const loadPerformanceData = async () => {
+            if (!employee?.id || !selectedCycleId) return;
+            try {
+                // 1. Fetch current cycle metadata
+                const cyclesRes = await onboardingService.getPerformanceCycles();
+                if (cyclesRes.success) {
+                    const foundCycle = cyclesRes.data.find(c => c.id === selectedCycleId);
+                    setCurrentCycle(foundCycle || null);
+                }
+                
+                // 2. Fetch goals
+                const goalsRes = await performanceGoalService.getEmployeeGoals(employee.id, selectedCycleId);
+                if (goalsRes.success) {
+                    setGoals(goalsRes.data);
+                }
+                
+                // 3. Fetch review
+                const reviewRes = await performanceGoalService.getEmployeeReview(employee.id, selectedCycleId);
+                if (reviewRes.success) {
+                    const rev = reviewRes.data || {
+                        self_achievements: '',
+                        self_challenges: '',
+                        self_learning: '',
+                        manager_comments: '',
+                        manager_recommendation: 'Retain with Standard Increment'
+                    };
+                    const mappedRev = {
+                        ...rev,
+                        selfAchievements: rev.self_achievements || '',
+                        selfChallenges: rev.self_challenges || '',
+                        selfLearning: rev.self_learning || '',
+                        managerComments: rev.manager_comments || '',
+                        managerRec: rev.manager_recommendation || 'Retain with Standard Increment'
+                    };
+                    setReview(mappedRev);
+                    setComments(mappedRev.managerComments || '');
+                    setRec(mappedRev.managerRec || 'Retain with Standard Increment');
+                }
+                setEditingGoalId(null);
+            } catch (err) {
+                console.error("Error loading performance data:", err);
+                toast.error("Failed to load performance metrics from database");
+            }
+        };
+
+        loadPerformanceData();
     }, [employee?.id, selectedCycleId]);
 
-    const saveGoals = (updatedGoals) => {
-        setGoals(updatedGoals);
-        localStorage.setItem(`mano_perf_goals_${employee.id}_${selectedCycleId}`, JSON.stringify(updatedGoals));
-    };
-
-    const handleAddGoal = (e) => {
+    const handleAddGoal = async (e) => {
         e.preventDefault();
         if (!newGoalForm.title || !newGoalForm.deadline) {
             toast.error("Please fill in Goal Title and Due Deadline.");
             return;
         }
 
-        const newGoal = {
-            id: `goal-${Date.now()}`,
-            title: newGoalForm.title,
-            deadline: newGoalForm.deadline,
-            status: 'Pending',
-            rating: 0,
-            comments: ''
-        };
-
-        const updated = [...goals, newGoal];
-        saveGoals(updated);
-        setNewGoalForm({ title: '', deadline: '' });
-        toast.success("Appraisal Goal assigned successfully!");
-    };
-
-    const updateGoalField = (goalId, key, value) => {
-        const updated = goals.map(g => {
-            if (g.id === goalId) {
-                return { ...g, [key]: value };
+        // Date bounds validation
+        if (currentCycle?.start_date && currentCycle?.end_date) {
+            const dl = new Date(newGoalForm.deadline);
+            const start = new Date(currentCycle.start_date);
+            const end = new Date(currentCycle.end_date);
+            if (dl < start || dl > end) {
+                toast.error(`Goal deadline must fall within the cycle period: ${currentCycle.start_date} to ${currentCycle.end_date}`);
+                return;
             }
-            return g;
-        });
-        saveGoals(updated);
+        }
+
+        try {
+            await performanceGoalService.createGoal({
+                employee_id: employee.id,
+                cycle_id: selectedCycleId,
+                title: newGoalForm.title,
+                deadline: newGoalForm.deadline
+            });
+            toast.success("Appraisal Goal assigned successfully!");
+            setNewGoalForm({ title: '', deadline: '' });
+            
+            // Reload goals
+            const goalsRes = await performanceGoalService.getEmployeeGoals(employee.id, selectedCycleId);
+            if (goalsRes.success) setGoals(goalsRes.data);
+        } catch (err) {
+            console.error(err);
+            toast.error(err.response?.data?.message || err.message || "Failed to assign goal");
+        }
     };
 
-    const handleDeleteGoal = (goalId) => {
-        const updated = goals.filter(g => g.id !== goalId);
-        saveGoals(updated);
-        toast.info("Goal removed from sheet");
-        if (editingGoalId === goalId) setEditingGoalId(null);
+    const updateGoalField = async (goalId, key, value) => {
+        try {
+            await performanceGoalService.updateGoal(goalId, { [key]: value });
+            // Reload goals
+            const goalsRes = await performanceGoalService.getEmployeeGoals(employee.id, selectedCycleId);
+            if (goalsRes.success) setGoals(goalsRes.data);
+        } catch (err) {
+            console.error(err);
+            toast.error(err.response?.data?.message || err.message || "Failed to update goal");
+        }
     };
 
-    const handleSaveGoalReview = (goalId) => {
-        const updated = goals.map(g => {
-            if (g.id === goalId) {
-                return {
-                    ...g,
-                    rating: parseInt(goalRatingInput),
-                    comments: goalCommentsInput
-                };
-            }
-            return g;
-        });
-        saveGoals(updated);
-        setEditingGoalId(null);
-        toast.success("Goal rating and comments saved.");
+    const handleDeleteGoal = async (goalId) => {
+        try {
+            await performanceGoalService.deleteGoal(goalId);
+            toast.info("Goal removed from sheet");
+            if (editingGoalId === goalId) setEditingGoalId(null);
+            // Reload goals
+            const goalsRes = await performanceGoalService.getEmployeeGoals(employee.id, selectedCycleId);
+            if (goalsRes.success) setGoals(goalsRes.data);
+        } catch (err) {
+            console.error(err);
+            toast.error(err.response?.data?.message || err.message || "Failed to delete goal");
+        }
     };
 
-    const handleSaveOverallAppraisal = (e) => {
+    const handleSaveGoalReview = async (goalId) => {
+        try {
+            await performanceGoalService.updateGoal(goalId, {
+                rating: parseInt(goalRatingInput),
+                comments: goalCommentsInput
+            });
+            setEditingGoalId(null);
+            toast.success("Goal rating and comments saved.");
+            // Reload goals
+            const goalsRes = await performanceGoalService.getEmployeeGoals(employee.id, selectedCycleId);
+            if (goalsRes.success) setGoals(goalsRes.data);
+        } catch (err) {
+            console.error(err);
+            toast.error(err.response?.data?.message || err.message || "Failed to save goal review");
+        }
+    };
+
+    const handleSaveOverallAppraisal = async (e) => {
         e.preventDefault();
-        const updatedReview = {
-            ...review,
-            managerComments: comments,
-            managerRec: rec,
-            lastUpdated: new Date().toLocaleString()
-        };
-        setReview(updatedReview);
-        localStorage.setItem(`mano_perf_review_${employee.id}_${selectedCycleId}`, JSON.stringify(updatedReview));
-        toast.success("Appraisal report updated successfully!");
+        try {
+            const res = await performanceGoalService.saveReview({
+                employee_id: employee.id,
+                cycle_id: selectedCycleId,
+                manager_comments: comments,
+                manager_recommendation: rec
+            });
+            if (res.success) {
+                const rev = res.data;
+                const mappedRev = {
+                    ...rev,
+                    selfAchievements: rev.self_achievements || '',
+                    selfChallenges: rev.self_challenges || '',
+                    selfLearning: rev.self_learning || '',
+                    managerComments: rev.manager_comments || '',
+                    managerRec: rev.manager_recommendation || 'Retain with Standard Increment'
+                };
+                setReview(mappedRev);
+                toast.success("Appraisal report updated successfully!");
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error(err.response?.data?.message || err.message || "Failed to save appraisal review");
+        }
     };
 
     // Calculate arithmetic average score
@@ -199,14 +192,26 @@ export const PerformanceHub = ({ employee, selectedCycleId }) => {
             {/* KPI Performance Header Score Summary */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="md:col-span-2 p-4 bg-slate-50 dark:bg-[#161b22]/30 border border-slate-200 dark:border-github-dark-border rounded-xl flex flex-col justify-between">
-                    <div>
-                        <h4 className="font-bold text-sm text-slate-800 dark:text-github-dark-text flex items-center gap-1.5">
-                            <Award size={16} className="text-indigo-500" />
-                            Performance Hub & Appraisal Panel
-                        </h4>
-                        <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
-                            Assign goals to employees, track execution progress, and record manager review feedback. The overall rating is calculated as a simple arithmetic average of all rated goals.
-                        </p>
+                    <div className="flex justify-between items-start gap-3">
+                        <div>
+                            <h4 className="font-bold text-sm text-slate-800 dark:text-github-dark-text flex items-center gap-1.5">
+                                <Award size={16} className="text-indigo-500" />
+                                Performance Hub & Appraisal Panel
+                            </h4>
+                            <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                                Assign goals to employees, track execution progress, and record manager review feedback. The overall rating is calculated as a simple arithmetic average of all rated goals.
+                            </p>
+                        </div>
+                        {currentCycle && (
+                            <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase border tracking-wider shrink-0 ${
+                                currentCycle.status === 'Active' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-800' :
+                                currentCycle.status === 'Evaluating' ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-800' :
+                                currentCycle.status === 'Upcoming' ? 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-800' :
+                                'bg-slate-100 text-slate-800 border-slate-300 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-800'
+                            }`}>
+                                {currentCycle.name} • {currentCycle.status}
+                            </span>
+                        )}
                     </div>
                     <div className="flex items-center gap-3 mt-4 text-[10px] font-mono text-slate-455">
                         <span>Staff: <strong>{employee?.name}</strong> ({employee?.designation})</span>
@@ -259,6 +264,7 @@ export const PerformanceHub = ({ employee, selectedCycleId }) => {
                                                             <select
                                                                 value={goal.status}
                                                                 onChange={(e) => updateGoalField(goal.id, 'status', e.target.value)}
+                                                                disabled={currentCycle?.status === 'Closed'}
                                                                 className="bg-transparent border-b border-slate-200 dark:border-github-dark-border font-bold text-slate-600 dark:text-slate-350 focus:outline-none cursor-pointer"
                                                             >
                                                                 <option value="Pending">Pending</option>
@@ -271,7 +277,7 @@ export const PerformanceHub = ({ employee, selectedCycleId }) => {
                                                 </div>
 
                                                 <div className="flex items-center gap-1.5">
-                                                    {!isEditing && (
+                                                    {!isEditing && currentCycle?.status !== 'Upcoming' && currentCycle?.status !== 'Closed' && (
                                                         <button
                                                             onClick={() => {
                                                                 setEditingGoalId(goal.id);
@@ -283,13 +289,15 @@ export const PerformanceHub = ({ employee, selectedCycleId }) => {
                                                             {goal.rating > 0 ? 'Edit Review' : 'Rate Goal'}
                                                         </button>
                                                     )}
-                                                    <button
-                                                        onClick={() => handleDeleteGoal(goal.id)}
-                                                        className="p-1 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-slate-400 hover:text-red-500 rounded"
-                                                        title="Remove Goal"
-                                                    >
-                                                        <Trash2 size={13} />
-                                                    </button>
+                                                    {currentCycle?.status !== 'Evaluating' && currentCycle?.status !== 'Closed' && (
+                                                        <button
+                                                            onClick={() => handleDeleteGoal(goal.id)}
+                                                            className="p-1 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-slate-400 hover:text-red-500 rounded"
+                                                            title="Remove Goal"
+                                                        >
+                                                            <Trash2 size={13} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
 
@@ -367,49 +375,59 @@ export const PerformanceHub = ({ employee, selectedCycleId }) => {
                             <p className="text-[10px] text-slate-400 mt-0.5">Submit the official recommendation and summary appraisal comments.</p>
                         </div>
                         
-                        <form onSubmit={handleSaveOverallAppraisal} className="space-y-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-1">
-                                    <label className="text-[10px] text-slate-400 font-bold block uppercase">Official Recommendation *</label>
-                                    <select
-                                        value={rec}
-                                        onChange={(e) => setRec(e.target.value)}
-                                        required
-                                        className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-lg text-xs"
-                                    >
-                                        <option value="Promote to Senior Role">Promote to Senior Role</option>
-                                        <option value="Retain with Standard Increment">Retain with Standard Increment</option>
-                                        <option value="Retain with Performance Improvement Plan">Retain with Performance Improvement Plan (PIP)</option>
-                                        <option value="Cycle Deferred">Cycle Deferred</option>
-                                    </select>
-                                </div>
-                                
-                                {review?.lastUpdated && (
-                                    <div className="flex items-end justify-end text-[9px] text-slate-400 font-mono pb-2">
-                                        Last saved: {review.lastUpdated}
+                        {currentCycle?.status === 'Upcoming' ? (
+                            <div className="p-4 bg-slate-50 dark:bg-github-dark-subtle/10 border border-slate-200 dark:border-github-dark-border rounded-xl text-center text-slate-450 italic font-semibold">
+                                Overall appraisal recommendation and summary reviews are locked during upcoming pre-planning phase.
+                            </div>
+                        ) : (
+                            <form onSubmit={handleSaveOverallAppraisal} className="space-y-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] text-slate-400 font-bold block uppercase">Official Recommendation *</label>
+                                        <select
+                                            value={rec}
+                                            onChange={(e) => setRec(e.target.value)}
+                                            required
+                                            disabled={currentCycle?.status === 'Closed'}
+                                            className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-lg text-xs"
+                                        >
+                                            <option value="Promote to Senior Role">Promote to Senior Role</option>
+                                            <option value="Retain with Standard Increment">Retain with Standard Increment</option>
+                                            <option value="Retain with Performance Improvement Plan">Retain with Performance Improvement Plan (PIP)</option>
+                                            <option value="Cycle Deferred">Cycle Deferred</option>
+                                        </select>
                                     </div>
+                                    
+                                    {review?.lastUpdated && (
+                                        <div className="flex items-end justify-end text-[9px] text-slate-400 font-mono pb-2">
+                                            Last saved: {review.lastUpdated}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-400 font-bold block uppercase">Overall Appraisal Comments & Summary Feedback *</label>
+                                    <textarea
+                                        value={comments}
+                                        onChange={(e) => setComments(e.target.value)}
+                                        required
+                                        disabled={currentCycle?.status === 'Closed'}
+                                        rows={3}
+                                        placeholder="Detail overall strengths, achievements, and feedback metrics..."
+                                        className="w-full px-3 py-2 bg-slate-50 dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl text-xs focus:outline-none"
+                                    />
+                                </div>
+
+                                {currentCycle?.status !== 'Closed' && (
+                                    <button
+                                        type="submit"
+                                        className="px-4 py-2 bg-[#0969da] hover:bg-[#0969da]/90 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-sm active:scale-98 transition-all"
+                                    >
+                                        <Check size={14} /> Submit Final Appraisal Review
+                                    </button>
                                 )}
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="text-[10px] text-slate-400 font-bold block uppercase">Overall Appraisal Comments & Summary Feedback *</label>
-                                <textarea
-                                    value={comments}
-                                    onChange={(e) => setComments(e.target.value)}
-                                    required
-                                    rows={3}
-                                    placeholder="Detail overall strengths, achievements, and feedback metrics..."
-                                    className="w-full px-3 py-2 bg-slate-50 dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl text-xs focus:outline-none"
-                                />
-                            </div>
-
-                            <button
-                                type="submit"
-                                className="px-4 py-2 bg-[#0969da] hover:bg-[#0969da]/90 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-sm active:scale-98 transition-all"
-                            >
-                                <Check size={14} /> Submit Final Appraisal Review
-                            </button>
-                        </form>
+                            </form>
+                        )}
                     </div>
 
                 </div>
@@ -421,37 +439,43 @@ export const PerformanceHub = ({ employee, selectedCycleId }) => {
                     <div className="bg-white dark:bg-[#161b22]/30 border border-slate-200 dark:border-github-dark-border rounded-xl p-4 space-y-4">
                         <h5 className="font-bold text-slate-800 dark:text-github-dark-text border-b border-slate-100 dark:border-github-dark-border pb-2">Assign Appraisal Goal</h5>
                         
-                        <form onSubmit={handleAddGoal} className="space-y-3">
-                            <div className="space-y-1">
-                                <label className="text-[10px] text-slate-400 font-bold block uppercase">Goal Title *</label>
-                                <textarea
-                                    required
-                                    value={newGoalForm.title}
-                                    onChange={(e) => setNewGoalForm({ ...newGoalForm, title: e.target.value })}
-                                    placeholder="e.g. Optimize React rendering and decrease LCP index speed"
-                                    className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                    rows={3}
-                                />
+                        {currentCycle?.status === 'Evaluating' || currentCycle?.status === 'Closed' ? (
+                            <div className="p-4 bg-slate-50 dark:bg-github-dark-subtle/10 border border-slate-200 dark:border-github-dark-border rounded-xl text-center text-slate-450 italic">
+                                Goal assignment is locked during {currentCycle.status.toLowerCase()} phase.
                             </div>
+                        ) : (
+                            <form onSubmit={handleAddGoal} className="space-y-3">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-400 font-bold block uppercase">Goal Title *</label>
+                                    <textarea
+                                        required
+                                        value={newGoalForm.title}
+                                        onChange={(e) => setNewGoalForm({ ...newGoalForm, title: e.target.value })}
+                                        placeholder="e.g. Optimize React rendering and decrease LCP index speed"
+                                        className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                        rows={3}
+                                    />
+                                </div>
 
-                            <div className="space-y-1">
-                                <label className="text-[10px] text-slate-400 font-bold block uppercase">Due Deadline *</label>
-                                <input
-                                    type="date"
-                                    required
-                                    value={newGoalForm.deadline}
-                                    onChange={(e) => setNewGoalForm({ ...newGoalForm, deadline: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-lg text-xs"
-                                />
-                            </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-400 font-bold block uppercase">Due Deadline *</label>
+                                    <input
+                                        type="date"
+                                        required
+                                        value={newGoalForm.deadline}
+                                        onChange={(e) => setNewGoalForm({ ...newGoalForm, deadline: e.target.value })}
+                                        className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-lg text-xs"
+                                    />
+                                </div>
 
-                            <button
-                                type="submit"
-                                className="w-full py-2.5 bg-[#0969da] hover:bg-[#0969da]/90 text-white rounded-lg font-bold flex justify-center items-center gap-1 shadow-sm transition-all mt-2"
-                            >
-                                <Plus size={14} /> Assign Goal
-                            </button>
-                        </form>
+                                <button
+                                    type="submit"
+                                    className="w-full py-2.5 bg-[#0969da] hover:bg-[#0969da]/90 text-white rounded-lg font-bold flex justify-center items-center gap-1 shadow-sm transition-all mt-2"
+                                >
+                                    <Plus size={14} /> Assign Goal
+                                </button>
+                            </form>
+                        )}
                     </div>
 
                     {/* Employee Self appraisal report card */}
@@ -531,7 +555,7 @@ export const AiPerformanceAnalyzer = ({ employee, selectedCycleId, employeeId, e
         }
     }, [empId, activeCycleId]);
 
-    const runAiPerformanceAnalysis = () => {
+    const runAiPerformanceAnalysis = async () => {
         if (!empId) return;
         setIsAnalyzing(true);
         setAiResult(null);
@@ -542,93 +566,110 @@ export const AiPerformanceAnalyzer = ({ employee, selectedCycleId, employeeId, e
             setAuditStep(2);
             setTimeout(() => {
                 setAuditStep(3);
-                setTimeout(() => {
+                setTimeout(async () => {
                     setAuditStep(4);
                     
-                    // Generate results
-                    const goals = getEmployeeGoalsFromStorage(empId, activeCycleId);
-                    const review = getEmployeeReviewFromStorage(empId, activeCycleId);
+                    try {
+                        // 1. Fetch goals from DB
+                        const goalsRes = await performanceGoalService.getEmployeeGoals(empId, activeCycleId);
+                        const goals = goalsRes.success ? goalsRes.data : [];
 
-                    const totalGoals = goals.length;
-                    const completedGoals = goals.filter(g => g.status === 'Completed').length;
-                    const completionRate = totalGoals > 0 ? (completedGoals / totalGoals) : 1;
-                    
-                    const ratedGoals = goals.filter(g => g.rating > 0);
-                    const totalRating = ratedGoals.reduce((sum, g) => sum + g.rating, 0);
-                    const ratingScore = ratedGoals.length > 0 ? (totalRating / ratedGoals.length) : 8.0;
-                    
-                    let overallScore = ((completionRate * 10) + ratingScore) / 2;
-                    overallScore = Math.round(overallScore * 10) / 10;
+                        // 2. Fetch review from DB
+                        const reviewRes = await performanceGoalService.getEmployeeReview(empId, activeCycleId);
+                        const rawReview = reviewRes.success ? (reviewRes.data || {}) : {};
+                        const review = {
+                            selfAchievements: rawReview.self_achievements || '',
+                            selfChallenges: rawReview.self_challenges || '',
+                            selfLearning: rawReview.self_learning || '',
+                            managerComments: rawReview.manager_comments || '',
+                            managerRec: rawReview.manager_recommendation || ''
+                        };
 
-                    let readiness = 'Medium';
-                    if (overallScore >= 8.5) readiness = 'High';
-                    if (overallScore < 7.0) readiness = 'Low';
+                        const totalGoals = goals.length;
+                        const completedGoals = goals.filter(g => g.status === 'Completed').length;
+                        const completionRate = totalGoals > 0 ? (completedGoals / totalGoals) : 1;
+                        
+                        const ratedGoals = goals.filter(g => g.rating > 0);
+                        const totalRating = ratedGoals.reduce((sum, g) => sum + g.rating, 0);
+                        const ratingScore = ratedGoals.length > 0 ? (totalRating / ratedGoals.length) : 8.0;
+                        
+                        let overallScore = ((completionRate * 10) + ratingScore) / 2;
+                        overallScore = Math.round(overallScore * 10) / 10;
 
-                    const strengths = [];
-                    const improvements = [];
+                        let readiness = 'Medium';
+                        if (overallScore >= 8.5) readiness = 'High';
+                        if (overallScore < 7.0) readiness = 'Low';
 
-                    // Attendance compliance logs simulation
-                    const empIdNum = parseInt(empId) || 101;
-                    const punctuality = Math.round((93 + (empIdNum % 7)) * 10) / 10; // 93% to 99%
-                    const totalShifts = 62 + (empIdNum % 5);
-                    const lateArrivals = empIdNum % 4;
-                    const leaves = empIdNum % 3;
+                        const strengths = [];
+                        const improvements = [];
 
-                    if (punctuality >= 95) {
-                        strengths.push(`Superior shift check-in punctuality rate of ${punctuality}%`);
-                        strengths.push(`Consistent work hours and low absenteeism (${leaves} leaves in cycle)`);
-                    } else {
-                        strengths.push(`Standard attendance presence with ${punctuality}% punctuality`);
-                        improvements.push(`Improve check-in times to minimize delayed arrivals (${lateArrivals} late instances)`);
-                    }
+                        // Attendance compliance logs simulation
+                        const empIdNum = parseInt(empId) || 101;
+                        const punctuality = Math.round((93 + (empIdNum % 7)) * 10) / 10; // 93% to 99%
+                        const totalShifts = 62 + (empIdNum % 5);
+                        const lateArrivals = empIdNum % 4;
+                        const leaves = empIdNum % 3;
 
-                    if (overallScore >= 8.0) {
-                        strengths.push("Excellent task SLA velocity with on-time milestone delivery.");
-                        strengths.push("Exceptional execution quality and self-monitoring capabilities.");
-                    } else {
-                        strengths.push("Satisfactory basic delivery of cycle objectives.");
-                        improvements.push("Speed up resolution SLAs and review pending goals.");
-                    }
-
-                    if (review.selfLearning && review.selfLearning.length > 15) {
-                        strengths.push("Proactive skills acquisition and self-learning dedication.");
-                    }
-
-                    if (review.selfChallenges && review.selfChallenges.length > 15) {
-                        improvements.push("Address technical bottlenecks related to workflow styling and configurations.");
-                    } else {
-                        improvements.push("Standardize code comments and enhance deployment configurations.");
-                    }
-
-                    const appraisalKeyLabel = overallScore >= 8.5 ? 'superior' : 'competent';
-                    const analysisReport = {
-                        score: overallScore,
-                        readiness,
-                        strengths,
-                        improvements,
-                        summary: `Employee shows strong capability in general tasks. Overall performance is rated as ${appraisalKeyLabel} with a total index score of ${overallScore}/10. Task completion stands at ${completedGoals}/${totalGoals} goals during the cycle. Check-in compliance stands at ${punctuality}% over ${totalShifts} shifts.`,
-                        attendance: {
-                            punctuality,
-                            totalShifts,
-                            lateArrivals,
-                            leaves
-                        },
-                        kpis: {
-                            total: totalGoals,
-                            completed: completedGoals,
-                            completionRate: Math.round(completionRate * 100)
-                        },
-                        alignment: {
-                            selfRating: review.selfAchievements ? 8.5 : 0,
-                            managerRating: ratingScore,
-                            gap: review.selfAchievements ? Math.round((ratingScore - 8.5) * 10) / 10 : 0
+                        if (punctuality >= 95) {
+                            strengths.push(`Superior shift check-in punctuality rate of ${punctuality}%`);
+                            strengths.push(`Consistent work hours and low absenteeism (${leaves} leaves in cycle)`);
+                        } else {
+                            strengths.push(`Standard attendance presence with ${punctuality}% punctuality`);
+                            improvements.push(`Improve check-in times to minimize delayed arrivals (${lateArrivals} late instances)`);
                         }
-                    };
 
-                    setAiResult(analysisReport);
-                    setIsAnalyzing(false);
-                    localStorage.setItem(`mano_perf_ai_${empId}_${activeCycleId}`, JSON.stringify(analysisReport));
-                    toast.success("AI performance audit complete!");
+                        if (overallScore >= 8.0) {
+                            strengths.push("Excellent task SLA velocity with on-time milestone delivery.");
+                            strengths.push("Exceptional execution quality and self-monitoring capabilities.");
+                        } else {
+                            strengths.push("Satisfactory basic delivery of cycle objectives.");
+                            improvements.push("Speed up resolution SLAs and review pending goals.");
+                        }
+
+                        if (review.selfLearning && review.selfLearning.length > 15) {
+                            strengths.push("Proactive skills acquisition and self-learning dedication.");
+                        }
+
+                        if (review.selfChallenges && review.selfChallenges.length > 15) {
+                            improvements.push("Address technical bottlenecks related to workflow styling and configurations.");
+                        } else {
+                            improvements.push("Standardize code comments and enhance deployment configurations.");
+                        }
+
+                        const appraisalKeyLabel = overallScore >= 8.5 ? 'superior' : 'competent';
+                        const analysisReport = {
+                            score: overallScore,
+                            readiness,
+                            strengths,
+                            improvements,
+                            summary: `Employee shows strong capability in general tasks. Overall performance is rated as ${appraisalKeyLabel} with a total index score of ${overallScore}/10. Task completion stands at ${completedGoals}/${totalGoals} goals during the cycle. Check-in compliance stands at ${punctuality}% over ${totalShifts} shifts.`,
+                            attendance: {
+                                punctuality,
+                                totalShifts,
+                                lateArrivals,
+                                leaves
+                            },
+                            kpis: {
+                                total: totalGoals,
+                                completed: completedGoals,
+                                completionRate: Math.round(completionRate * 100)
+                            },
+                            alignment: {
+                                selfRating: review.selfAchievements ? 8.5 : 0,
+                                managerRating: ratingScore,
+                                gap: review.selfAchievements ? Math.round((ratingScore - 8.5) * 10) / 10 : 0
+                            }
+                        };
+
+                        setAiResult(analysisReport);
+                        setIsAnalyzing(false);
+                        localStorage.setItem(`mano_perf_ai_${empId}_${activeCycleId}`, JSON.stringify(analysisReport));
+                        toast.success("AI performance audit complete!");
+                    } catch (err) {
+                        console.error(err);
+                        setIsAnalyzing(false);
+                        toast.error("Failed to fetch goals or reviews for AI audit simulation");
+                    }
                 }, 600);
             }, 600);
         }, 600);

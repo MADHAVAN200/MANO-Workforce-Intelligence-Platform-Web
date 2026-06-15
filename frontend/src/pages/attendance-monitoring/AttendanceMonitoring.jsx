@@ -48,7 +48,7 @@ import {
     Users
 } from 'lucide-react';
 import { adminService } from '../../services/adminService';
-import { attendanceService } from '../../services/attendanceService';
+import { attendanceService, attendanceCacheData } from '../../services/attendanceService';
 import DatePicker from '../../components/DatePicker';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
@@ -417,7 +417,8 @@ const AttendanceMonitoring = () => {
 
     // Data Fetching
     const fetchData = async (silent = false) => {
-        if (!silent) setLoading(true);
+        const hasCache = !!attendanceCacheData.dailySummaryAdmin[selectedDate];
+        if (!silent && !hasCache) setLoading(true);
         try {
             // 1. Fetch Dynamic Daily Summary for Admin
             const res = await attendanceService.getDailySummaryAdmin(selectedDate);

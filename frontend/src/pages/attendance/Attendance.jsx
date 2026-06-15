@@ -35,7 +35,7 @@ import {
     ChevronDown,
     Search
 } from 'lucide-react';
-import { attendanceService } from '../../services/attendanceService';
+import { attendanceService, attendanceCacheData } from '../../services/attendanceService';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-toastify';
 import {
@@ -348,10 +348,19 @@ const Attendance = () => {
 
     // Data State
     const [dailySessions, setDailySessions] = useState([]); // For Mark Attendance tab
-    const [monthlySessions, setMonthlySessions] = useState([]); // For My Attendance tab
+    const [monthlySessions, setMonthlySessions] = useState(() => {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const startDate = `${year}-${month}-01`;
+        const endDate = new Date(year, today.getMonth() + 1, 0).toISOString().split('T')[0];
+        const cacheKey = `${startDate}_${endDate}`;
+        const cached = attendanceCacheData.records[cacheKey];
+        return cached ? (cached.data || cached) : [];
+    });
     const [loading, setLoading] = useState(false);
-    const [holidays, setHolidays] = useState([]);
-    const [myShift, setMyShift] = useState(null);
+    const [holidays, setHolidays] = useState(() => attendanceCacheData.holidays?.holidays || attendanceCacheData.holidays || []);
+    const [myShift, setMyShift] = useState(() => attendanceCacheData.shiftPolicy?.shift || attendanceCacheData.shiftPolicy || null);
 
     // Analytics Date Filter States
     const [analyticsFilterType, setAnalyticsFilterType] = useState('this_month'); // 'this_month' | 'last_month' | 'select_month' | 'custom'
@@ -776,13 +785,20 @@ const Attendance = () => {
     // 2. Fetch Monthly Records (for "My Attendance" tab - History & Analytics)
     const fetchMonthlyRecords = useCallback(async (force = false) => {
         if (!force && activeTab !== 'my_attendance') return;
+
+        const year = reportMonth.split('-')[0];
+        const month = reportMonth.split('-')[1];
+        const startDate = `${year}-${month}-01`;
+        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+        const cacheKey = `${startDate}_${endDate}`;
+
+        if (!force && attendanceCacheData.records[cacheKey]) {
+            setMonthlySessions(attendanceCacheData.records[cacheKey].data || attendanceCacheData.records[cacheKey]);
+            return;
+        }
+
         setLoading(true);
         try {
-            const year = reportMonth.split('-')[0];
-            const month = reportMonth.split('-')[1];
-            const startDate = `${year}-${month}-01`;
-            const endDate = new Date(year, month, 0).toISOString().split('T')[0];
-
             const res = await attendanceService.getMyRecords(startDate, endDate);
             if (res.ok) setMonthlySessions(res.data);
         } catch (error) {
@@ -796,48 +812,75 @@ const Attendance = () => {
     // Fetch Filtered Analytics Records
     const fetchAnalyticsRecords = useCallback(async (force = false) => {
         if (!force && (activeTab !== 'my_attendance' || subTab !== 'analytics')) return;
-        setAnalyticsLoading(true);
-        try {
-            let start = '';
-            let end = '';
-            const today = new Date();
 
-            if (analyticsFilterType === 'this_month') {
-                const y = today.getFullYear();
-                const m = today.getMonth();
-                start = new Date(y, m, 1).toISOString().split('T')[0];
-                end = new Date(y, m + 1, 0).toISOString().split('T')[0];
-            } else if (analyticsFilterType === 'last_month') {
-                const y = today.getFullYear();
-                const m = today.getMonth() - 1;
-                start = new Date(y, m, 1).toISOString().split('T')[0];
-                end = new Date(y, m + 1, 0).toISOString().split('T')[0];
-            } else if (analyticsFilterType === 'select_month') {
-                if (analyticsSelectedMonth) {
-                    const [y, m] = analyticsSelectedMonth.split('-').map(Number);
-                    start = new Date(y, m - 1, 1).toISOString().split('T')[0];
-                    end = new Date(y, m, 0).toISOString().split('T')[0];
-                }
-            } else if (analyticsFilterType === 'custom') {
-                start = analyticsStartDate;
-                end = analyticsEndDate;
+        let start = '';
+        let end = '';
+        const today = new Date();
+
+        if (analyticsFilterType === 'this_month') {
+            const y = today.getFullYear();
+            const m = today.getMonth();
+            start = new Date(y, m, 1).toISOString().split('T')[0];
+            end = new Date(y, m + 1, 0).toISOString().split('T')[0];
+        } else if (analyticsFilterType === 'last_month') {
+            const y = today.getFullYear();
+            const m = today.getMonth() - 1;
+            start = new Date(y, m, 1).toISOString().split('T')[0];
+            end = new Date(y, m + 1, 0).toISOString().split('T')[0];
+        } else if (analyticsFilterType === 'select_month') {
+            if (analyticsSelectedMonth) {
+                const [y, m] = analyticsSelectedMonth.split('-').map(Number);
+                start = new Date(y, m - 1, 1).toISOString().split('T')[0];
+                end = new Date(y, m, 0).toISOString().split('T')[0];
+            }
+        } else if (analyticsFilterType === 'custom') {
+            start = analyticsStartDate;
+            end = analyticsEndDate;
+        }
+
+        if (start && end) {
+            const cacheKey = `${start}_${end}`;
+            if (!force && attendanceCacheData.records[cacheKey]) {
+                setAnalyticsSessions(attendanceCacheData.records[cacheKey].data || attendanceCacheData.records[cacheKey]);
+                return;
             }
 
-            if (start && end) {
+            setAnalyticsLoading(true);
+            try {
                 const res = await attendanceService.getMyRecords(start, end);
                 if (res.ok) setAnalyticsSessions(res.data);
+            } catch (error) {
+                console.error("Failed to fetch analytics records", error);
+                toast.error("Failed to fetch analytics data");
+            } finally {
+                setAnalyticsLoading(false);
             }
-        } catch (error) {
-            console.error("Failed to fetch analytics records", error);
-            toast.error("Failed to fetch analytics data");
-        } finally {
-            setAnalyticsLoading(false);
         }
     }, [activeTab, subTab, analyticsFilterType, analyticsSelectedMonth, analyticsStartDate, analyticsEndDate]);
 
     // 3. Fetch Correction History (my own requests only, even for admins)
     const fetchCorrectionHistory = useCallback(async () => {
         if (activeTab === 'my_attendance' && subTab === 'correction') {
+            const cacheKey = JSON.stringify({ limit: 10000, my_requests: 'true' });
+            if (attendanceCacheData.correctionRequests[cacheKey]) {
+                const history = attendanceCacheData.correctionRequests[cacheKey].data || attendanceCacheData.correctionRequests[cacheKey] || [];
+                setCorrectionHistory(history);
+                // Auto-select the first item
+                if (history.length > 0) {
+                    const first = history[0];
+                    const requestId = first.acr_id || first.request_id || first.id;
+                    const cachedDetail = attendanceCacheData.correctionDetails[requestId];
+                    if (cachedDetail) {
+                        setSelectedRequest({ ...first, ...(cachedDetail.data || cachedDetail) });
+                    } else {
+                        setSelectedRequest(first);
+                    }
+                } else {
+                    setSelectedRequest(null);
+                }
+                return;
+            }
+
             setLoading(true);
             try {
                 const res = await attendanceService.getCorrectionRequests({ limit: 10000, my_requests: 'true' });

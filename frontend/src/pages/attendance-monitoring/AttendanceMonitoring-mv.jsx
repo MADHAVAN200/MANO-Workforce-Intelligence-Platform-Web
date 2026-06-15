@@ -10,7 +10,7 @@ import {
     ChevronRight, ChevronLeft, Map, Camera, Users
 } from 'lucide-react';
 import { adminService } from '../../services/adminService';
-import { attendanceService } from '../../services/attendanceService';
+import { attendanceService, attendanceCacheData } from '../../services/attendanceService';
 import DatePicker from '../../components/DatePicker';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-toastify';
@@ -224,7 +224,8 @@ const MobileAttendanceMonitoring = () => {
 
     // --- DATA FETCHING (Feature Parity with Web) ---
     const fetchData = async (silent = false) => {
-        if (!silent) setLoading(true);
+        const hasCache = !!attendanceCacheData.dailySummaryAdmin[selectedDate];
+        if (!silent && !hasCache) setLoading(true);
         try {
             const [summaryRes, requestsRes] = await Promise.all([
                 attendanceService.getDailySummaryAdmin(selectedDate),

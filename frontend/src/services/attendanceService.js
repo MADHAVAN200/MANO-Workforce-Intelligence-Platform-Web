@@ -2,6 +2,47 @@ import api from './api';
 
 const API_BASE_URL = "/attendance";
 
+// Client-side memory cache for attendance data
+const cache = {
+    holidays: null,
+    shiftPolicy: null,
+    records: new Map(),
+    correctionRequests: new Map(),
+    correctionDetails: new Map(),
+    dailySummaryAdmin: new Map(),
+    dailySummary: new Map()
+};
+
+// Synchronous client-side cache for direct component consumption
+export const attendanceCacheData = {
+    holidays: null,
+    shiftPolicy: null,
+    records: {},
+    correctionRequests: {},
+    correctionDetails: {},
+    dailySummaryAdmin: {},
+    dailySummary: {}
+};
+
+// Clear the cache when data changes
+const clearCache = () => {
+    cache.holidays = null;
+    cache.shiftPolicy = null;
+    cache.records.clear();
+    cache.correctionRequests.clear();
+    cache.correctionDetails.clear();
+    cache.dailySummaryAdmin.clear();
+    cache.dailySummary.clear();
+
+    attendanceCacheData.holidays = null;
+    attendanceCacheData.shiftPolicy = null;
+    attendanceCacheData.records = {};
+    attendanceCacheData.correctionRequests = {};
+    attendanceCacheData.correctionDetails = {};
+    attendanceCacheData.dailySummaryAdmin = {};
+    attendanceCacheData.dailySummary = {};
+};
+
 export const attendanceService = {
     // Check In
     async timeIn(data) {
@@ -22,6 +63,7 @@ export const attendanceService = {
                     'Content-Type': 'multipart/form-data',
                 },
             });
+            clearCache();
             return res.data;
         } catch (error) {
             throw new Error(error.response?.data?.message || "Failed to check in");
@@ -44,6 +86,7 @@ export const attendanceService = {
                     'Content-Type': 'multipart/form-data',
                 },
             });
+            clearCache();
             return res.data;
         } catch (error) {
             throw new Error(error.response?.data?.message || "Failed to check out");
@@ -52,16 +95,28 @@ export const attendanceService = {
 
     // Get Records for a user
     async getMyRecords(dateFrom, dateTo) {
-        let url = `${API_BASE_URL}/records?limit=50`;
-        if (dateFrom) url += `&date_from=${dateFrom}`;
-        if (dateTo) url += `&date_to=${dateTo}`;
-
-        try {
-            const res = await api.get(url);
-            return res.data;
-        } catch (error) {
-            throw new Error(error.response?.data?.message || "Failed to fetch records");
+        const cacheKey = `${dateFrom || ''}_${dateTo || ''}`;
+        if (cache.records.has(cacheKey)) {
+            return cache.records.get(cacheKey);
         }
+
+        const promise = (async () => {
+            let url = `${API_BASE_URL}/records?limit=50`;
+            if (dateFrom) url += `&date_from=${dateFrom}`;
+            if (dateTo) url += `&date_to=${dateTo}`;
+
+            try {
+                const res = await api.get(url);
+                attendanceCacheData.records[cacheKey] = res.data;
+                return res.data;
+            } catch (error) {
+                cache.records.delete(cacheKey);
+                throw new Error(error.response?.data?.message || "Failed to fetch records");
+            }
+        })();
+
+        cache.records.set(cacheKey, promise);
+        return promise;
     },
 
 
@@ -118,6 +173,7 @@ export const attendanceService = {
     async submitCorrectionRequest(data) {
         try {
             const res = await api.post(`${API_BASE_URL}/correction-request`, data);
+            clearCache();
             return res.data;
         } catch (error) {
             throw new Error(error.response?.data?.error || "Failed to submit correction request");
@@ -126,22 +182,46 @@ export const attendanceService = {
 
     // Get list of correction requests (Admin sees all, User sees own)
     async getCorrectionRequests(params = {}) {
-        try {
-            const res = await api.get(`${API_BASE_URL}/correction-requests`, { params });
-            return res.data;
-        } catch (error) {
-            throw new Error(error.response?.data?.error || "Failed to fetch correction requests");
+        const cacheKey = JSON.stringify(params);
+        if (cache.correctionRequests.has(cacheKey)) {
+            return cache.correctionRequests.get(cacheKey);
         }
+
+        const promise = (async () => {
+            try {
+                const res = await api.get(`${API_BASE_URL}/correction-requests`, { params });
+                attendanceCacheData.correctionRequests[cacheKey] = res.data;
+                return res.data;
+            } catch (error) {
+                cache.correctionRequests.delete(cacheKey);
+                throw new Error(error.response?.data?.error || "Failed to fetch correction requests");
+            }
+        })();
+
+        cache.correctionRequests.set(cacheKey, promise);
+        return promise;
     },
 
     // Get specific correction request details
     async getCorrectionDetails(acr_id) {
-        try {
-            const res = await api.get(`${API_BASE_URL}/correction-request/${acr_id}`);
-            return res.data;
-        } catch (error) {
-            throw new Error(error.response?.data?.error || "Failed to fetch correction details");
+        if (!acr_id) return null;
+        if (cache.correctionDetails.has(acr_id)) {
+            return cache.correctionDetails.get(acr_id);
         }
+
+        const promise = (async () => {
+            try {
+                const res = await api.get(`${API_BASE_URL}/correction-request/${acr_id}`);
+                attendanceCacheData.correctionDetails[acr_id] = res.data;
+                return res.data;
+            } catch (error) {
+                cache.correctionDetails.delete(acr_id);
+                throw new Error(error.response?.data?.error || "Failed to fetch correction details");
+            }
+        })();
+
+        cache.correctionDetails.set(acr_id, promise);
+        return promise;
     },
 
     // Update correction status (Admin only)
@@ -152,6 +232,7 @@ export const attendanceService = {
                 review_comments,
                 ...overrides
             });
+            clearCache();
             return res.data;
         } catch (error) {
             throw new Error(error.response?.data?.error || "Failed to update correction status");
@@ -159,12 +240,23 @@ export const attendanceService = {
     },
     // Get Holidays
     async getHolidays() {
-        try {
-            const res = await api.get('/holiday');
-            return res.data;
-        } catch (error) {
-            throw new Error(error.response?.data?.message || "Failed to fetch holidays");
+        if (cache.holidays) {
+            return cache.holidays;
         }
+
+        const promise = (async () => {
+            try {
+                const res = await api.get('/holiday');
+                attendanceCacheData.holidays = res.data;
+                return res.data;
+            } catch (error) {
+                cache.holidays = null;
+                throw new Error(error.response?.data?.message || "Failed to fetch holidays");
+            }
+        })();
+
+        cache.holidays = promise;
+        return promise;
     },
 
     // Employee Dashboard Stats
@@ -283,33 +375,67 @@ export const attendanceService = {
     },
     // Get My Shift Policy
     async getMyShiftPolicy() {
-        try {
-            const res = await api.get(`${API_BASE_URL}/my-shift`);
-            return res.data;
-        } catch (error) {
-            console.error("Failed to fetch shift policy", error);
-            return { success: false, shift: null };
+        if (cache.shiftPolicy) {
+            return cache.shiftPolicy;
         }
-    },
-    // Get Daily Summary (User range)
+
+        const promise = (async () => {
+            try {
+                const res = await api.get(`${API_BASE_URL}/my-shift`);
+                attendanceCacheData.shiftPolicy = res.data;
+                return res.data;
+            } catch (error) {
+                cache.shiftPolicy = null;
+                console.error("Failed to fetch shift policy", error);
+                return { success: false, shift: null };
+            }
+        })();
+
+        cache.shiftPolicy = promise;
+        return promise;
+    },// Get Daily Summary (User range)
     async getDailySummary(dateFrom, dateTo) {
-        try {
-            const res = await api.get(`${API_BASE_URL}/daily-summary?date_from=${dateFrom}&date_to=${dateTo}`);
-            return res.data;
-        } catch (error) {
-            console.error("Failed to fetch daily summary", error);
-            throw new Error(error.response?.data?.message || "Failed to fetch daily summary");
+        const cacheKey = `${dateFrom || ''}_${dateTo || ''}`;
+        if (cache.dailySummary.has(cacheKey)) {
+            return cache.dailySummary.get(cacheKey);
         }
+
+        const promise = (async () => {
+            try {
+                const res = await api.get(`${API_BASE_URL}/daily-summary?date_from=${dateFrom}&date_to=${dateTo}`);
+                attendanceCacheData.dailySummary[cacheKey] = res.data;
+                return res.data;
+            } catch (error) {
+                cache.dailySummary.delete(cacheKey);
+                console.error("Failed to fetch daily summary", error);
+                throw new Error(error.response?.data?.message || "Failed to fetch daily summary");
+            }
+        })();
+
+        cache.dailySummary.set(cacheKey, promise);
+        return promise;
     },
     // Get Daily Summary (Admin single date)
     async getDailySummaryAdmin(date) {
-        try {
-            const res = await api.get(`${API_BASE_URL}/daily-summary/admin?date=${date}`);
-            return res.data;
-        } catch (error) {
-            console.error("Failed to fetch admin daily summary", error);
-            throw new Error(error.response?.data?.message || "Failed to fetch live daily summary");
+        const cacheKey = date || new Date().toISOString().split('T')[0];
+        if (cache.dailySummaryAdmin.has(cacheKey)) {
+            return cache.dailySummaryAdmin.get(cacheKey);
         }
+
+        const promise = (async () => {
+            try {
+                const res = await api.get(`${API_BASE_URL}/daily-summary/admin?date=${cacheKey}`);
+                attendanceCacheData.dailySummaryAdmin[cacheKey] = res.data;
+                return res.data;
+            } catch (error) {
+                cache.dailySummaryAdmin.delete(cacheKey);
+                console.error("Failed to fetch admin daily summary", error);
+                throw new Error(error.response?.data?.message || "Failed to fetch live daily summary");
+            }
+        })();
+
+        cache.dailySummaryAdmin.set(cacheKey, promise);
+        return promise;
     },
     // Get self-service report preview
     async getMyReportPreview(month, type, date = "", startDate = "", endDate = "", columns = "") {

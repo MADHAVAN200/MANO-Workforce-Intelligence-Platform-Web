@@ -9,7 +9,8 @@ const cache = {
     designations: null,
     shifts: null,
     workLocations: null,
-    users: new Map()
+    users: new Map(),
+    dashboardStats: new Map()
 };
 
 // Synchronous client-side cache for direct component consumption
@@ -18,7 +19,8 @@ export const adminCacheData = {
     designations: null,
     shifts: null,
     workLocations: null,
-    users: {}
+    users: {},
+    dashboardStats: {}
 };
 
 const clearUserCache = () => {
@@ -31,12 +33,14 @@ const clearCache = () => {
     cache.designations = null;
     cache.shifts = null;
     cache.workLocations = null;
+    cache.dashboardStats.clear();
     clearUserCache();
 
     adminCacheData.departments = null;
     adminCacheData.designations = null;
     adminCacheData.shifts = null;
     adminCacheData.workLocations = null;
+    adminCacheData.dashboardStats = {};
 };
 
 export const adminService = {
@@ -363,16 +367,28 @@ export const adminService = {
         }
     },
 
-    async getDashboardStats(range = 'weekly', month = null, year = null) {
-        try {
-            let url = `${ADMIN_API_URL}/dashboard-stats?range=${range}`;
-            if (month && year) {
-                url += `&month=${month}&year=${year}`;
-            }
-            const res = await api.get(url);
-            return res.data;
-        } catch (error) {
-            throw new Error(error.response?.data?.message || "Failed to fetch dashboard stats");
+    async getDashboardStats(range = 'weekly', month = null, year = null, forceRefresh = false) {
+        const cacheKey = `${range}_${month || 'null'}_${year || 'null'}`;
+        if (!forceRefresh && cache.dashboardStats.has(cacheKey)) {
+            return cache.dashboardStats.get(cacheKey);
         }
+
+        const promise = (async () => {
+            try {
+                let url = `${ADMIN_API_URL}/dashboard-stats?range=${range}`;
+                if (month && year) {
+                    url += `&month=${month}&year=${year}`;
+                }
+                const res = await api.get(url);
+                adminCacheData.dashboardStats[cacheKey] = res.data;
+                return res.data;
+            } catch (error) {
+                cache.dashboardStats.delete(cacheKey);
+                throw new Error(error.response?.data?.message || "Failed to fetch dashboard stats");
+            }
+        })();
+
+        cache.dashboardStats.set(cacheKey, promise);
+        return promise;
     }
 };

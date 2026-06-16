@@ -22,6 +22,7 @@ import systemMonitorRoutes from './admin/systemMonitorRoutes.js';
 import superAdminRoutes from './superAdmin/superAdminRoutes.js';
 import chatbotRoutes from './chatbot/chatbotRoutes.js';
 import chatRoutes from './collaboration/chatRoutes.js';
+import labourRoutes from './labour/labourRoutes.js';
 
 import { requireActiveOrg } from '../middleware/auth.js';
 
@@ -29,6 +30,7 @@ const router = express.Router();
 
 // Mount feature-specific routes
 router.use('/admin', adminRoutes);
+router.use('/labour', requireActiveOrg, labourRoutes);
 router.use('/employee', employeeRoutes);
 router.use('/auth', authRoutes);
 router.use('/holiday', holidayRoutes);

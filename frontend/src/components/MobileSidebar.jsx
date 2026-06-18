@@ -17,7 +17,8 @@ import {
     ShieldAlert,
     MessageSquare,
     Code,
-    X
+    X,
+    Hammer
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -52,6 +53,7 @@ const MobileSidebar = ({ isOpen, onClose }) => {
         { icon: <MessageSquare size={18} />, text: "User Feedback", to: "/super-admin/feedback", roles: ['super_admin'] },
         { icon: <Code size={18} />, text: "System Logs", to: "/super-admin/logs", roles: ['super_admin'] },
         { icon: <Users size={18} />, text: "Employees", to: "/employees", roles: ['admin', 'hr'] },
+        { icon: <Hammer size={18} />, text: "Labour Management", to: "/labour-management", roles: ['admin', 'hr'] },
         { icon: <Calendar size={18} />, text: "Attendance", to: "/attendance", roles: ['admin', 'hr', 'employee'] },
         { icon: <Clock size={18} />, text: "Live Attendance", to: "/attendance-monitoring", roles: ['admin', 'hr'] },
         { icon: <TrendingUp size={18} />, text: "Reports", to: "/reports", roles: ['admin', 'hr'] },

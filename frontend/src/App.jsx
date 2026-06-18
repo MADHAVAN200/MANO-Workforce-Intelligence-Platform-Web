@@ -37,6 +37,7 @@ import DailyActivity from "./pages/dar/DailyActivity"
 import DARAdmin from "./pages/dar/DARAdmin"
 import LeaveApplication from "./pages/holidays/LeaveApplication"
 import ChatPage from "./pages/collaboration/ChatPage";
+import LabourManagement from "./pages/labour/LabourManagement"
 
 // Organization Pages Imports
 
@@ -74,6 +75,7 @@ import OrganizationListMobile from "./pages/organizations/OrganizationList-mv";
 import SecurityAlertsMobile from "./pages/super-admin/SecurityAlerts-mv";
 import UserFeedbackMobile from "./pages/super-admin/UserFeedback-mv";
 import MobileChatPage from "./pages/collaboration/ChatPage-mv";
+import MobileLabourManagement from "./pages/labour/MobileLabourManagement";
 
 
 import SuperAdminDashboard from "./pages/dashboard/SuperAdminDashboard";
@@ -322,6 +324,7 @@ function App() {
               <Route path="/employees/bulk" element={<ResponsiveRoute DesktopComponent={BulkUpload} MobileComponent={MobileBulkUpload} />} />
               <Route path="/holidays/bulk" element={<ResponsiveRoute DesktopComponent={BulkHolidayImport} MobileComponent={MobileBulkHolidayImport} />} />
               <Route path="/dar-admin" element={<DARAdmin />} />
+              <Route path="/labour-management" element={<ResponsiveRoute DesktopComponent={LabourManagement} MobileComponent={MobileLabourManagement} />} />
             </Route>
 
             {/* Admin Only Routes */}

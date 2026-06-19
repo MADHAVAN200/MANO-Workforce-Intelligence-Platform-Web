@@ -452,7 +452,7 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
             pushPdfCol("In Time", "timeIn", 4);
             pushPdfCol("Out Time", "timeOut", 5);
             pushPdfCol("Work Hrs", "workedHours", 6);
-            pdfCols.push("Status");
+            pushPdfCol("Status", "status", 7);
             pushPdfCol("In Location", "location", 8);
             pushPdfCol("Out Location", "location", 9);
 
@@ -472,14 +472,11 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
 
                 const row = [fullRow[0], fullRow[1], fullRow[2], fullRow[3]];
                 pdfColIndices.forEach(idx => {
-                    if (idx < 7) row.push(fullRow[idx]);
-                });
-                row.push(fullRow[7]); // Status
-                pdfColIndices.forEach(idx => {
-                    if (idx >= 8) row.push(fullRow[idx]);
+                    row.push(fullRow[idx]);
                 });
                 return row;
             });
+
         } else if (type === "matrix_daily") {
             pdfCols = ["Name", "Dept"];
             const pdfColIndices = [];
@@ -494,7 +491,7 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
             pushPdfCol("In Time", "timeIn", 2);
             pushPdfCol("Out Time", "timeOut", 3);
             pushPdfCol("Work Hrs", "workedHours", 4);
-            pdfCols.push("Status");
+            pushPdfCol("Status", "status", 5);
             pushPdfCol("In Location", "location", 6);
             pushPdfCol("Out Location", "location", 7);
 
@@ -514,11 +511,7 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
 
                 const row = [fullRow[0], fullRow[1]];
                 pdfColIndices.forEach(idx => {
-                    if (idx < 5) row.push(fullRow[idx]);
-                });
-                row.push(fullRow[5]); // Status
-                pdfColIndices.forEach(idx => {
-                    if (idx >= 6) row.push(fullRow[idx]);
+                    row.push(fullRow[idx]);
                 });
                 return row;
             });
@@ -817,7 +810,7 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
         pushCol("Time In", "time_in", "timeIn", 15);
         pushCol("Time Out", "time_out", "timeOut", 15);
         pushCol("Work Hours", "work_hrs", "workedHours", 12);
-        cols.push({ header: "Status", key: "status", width: 15 });
+        pushCol("Status", "status", "status", 15);
         pushCol("In Location", "time_in_address", "location", 40);
         pushCol("Out Location", "time_out_address", "location", 40);
 
@@ -834,7 +827,7 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
             if (colsObj.timeIn !== false) rowData.time_in = reportsService.formatLocalTimeStr(aggregated.time_in);
             if (colsObj.timeOut !== false) rowData.time_out = reportsService.formatLocalTimeStr(aggregated.time_out);
             if (colsObj.workedHours !== false) rowData.work_hrs = parseFloat(aggregated.worked_hours.toFixed(2));
-            rowData.status = aggregated.status;
+            if (colsObj.status !== false) rowData.status = aggregated.status;
             if (colsObj.location !== false) {
                 rowData.time_in_address = aggregated.time_in_address;
                 rowData.time_out_address = aggregated.time_out_address;
@@ -1061,7 +1054,7 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
         pushCol("Time In", "time_in", "timeIn", 15);
         pushCol("Time Out", "time_out", "timeOut", 15);
         pushCol("Work Hrs", "work_hrs", "workedHours", 12);
-        cols.push({ header: "Status", key: "status", width: 15 });
+        pushCol("Status", "status", "status", 15);
         pushCol("In Location", "time_in_address", "location", 40);
         pushCol("Out Location", "time_out_address", "location", 40);
 
@@ -1078,7 +1071,7 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
             if (colsObj.timeIn !== false) rowData.time_in = reportsService.formatLocalTimeStr(r.time_in, true);
             if (colsObj.timeOut !== false) rowData.time_out = reportsService.formatLocalTimeStr(r.time_out, true);
             if (colsObj.workedHours !== false) rowData.work_hrs = reportsService.calculateWorkHours(r.time_in, r.time_out);
-            rowData.status = reportsService.deriveStatus(r);
+            if (colsObj.status !== false) rowData.status = reportsService.deriveStatus(r);
             if (colsObj.location !== false) {
                 rowData.time_in_address = r.time_in_address || "-";
                 rowData.time_out_address = r.time_out_address || "-";
@@ -1255,6 +1248,9 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
         
         let dailyColspan = 0;
         const subCols = [];
+        
+        dailyColspan++;
+        subCols.push({ label: "Status", key: "status" });
         if (colsObj.timeIn !== false) {
             dailyColspan++;
             subCols.push({ label: "In Time", key: "timeIn" });
@@ -1354,7 +1350,8 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
                 const aggregated = reportsService.aggregateDayRecords(dayRecs, u.policy_rules);
                 if (aggregated.time_in) {
                     subCols.forEach(sc => {
-                        if (sc.label === "In Time") userRow.push(reportsService.formatLocalTimeStr(aggregated.time_in));
+                        if (sc.label === "Status") userRow.push(aggregated.status);
+                        else if (sc.label === "In Time") userRow.push(reportsService.formatLocalTimeStr(aggregated.time_in));
                         else if (sc.label === "Out Time") userRow.push(reportsService.formatLocalTimeStr(aggregated.time_out));
                         else if (sc.label === "Work Hrs") userRow.push(parseFloat(aggregated.worked_hours.toFixed(2)));
                         else if (sc.label === "Req Hrs") {
@@ -1377,7 +1374,7 @@ export const compileReportBuffer = async ({ org_id, targetUserId, month, date, t
                     const day = d.getDay();
                     const statusStr = day === 0 ? "Sun" : day === 6 ? "Sat" : "Absent";
                     subCols.forEach((sc, scIdx) => {
-                        if (scIdx === 0) userRow.push(statusStr);
+                        if (sc.label === "Status") userRow.push(statusStr);
                         else userRow.push("-");
                     });
                 }

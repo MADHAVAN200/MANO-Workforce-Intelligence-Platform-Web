@@ -1,4 +1,5 @@
 import { attendanceDB } from '../../config/database.js';
+import * as S3Service from '../s3/s3Service.js';
 
 // Helper: Calculate Work Hours
 export const calculateWorkHours = (timeIn, timeOut) => {
@@ -223,7 +224,7 @@ export const resolveDateRange = ({ type, month, date, startDate: customStart, en
     } else if (["matrix_monthly", "attendance_matrix_monthly", "attendance_summary", "attendance_detailed"].includes(type) || month) {
         const [year, monthNum] = month.split("-");
         startDate = `${month}-01`;
-        endDate = new Date(year, monthNum, 0).toISOString().split("T")[0];
+        endDate = new Date(Date.UTC(year, monthNum, 0)).toISOString().split("T")[0];
     }
 
     return { startDate, endDate };
@@ -275,6 +276,99 @@ export async function getDetailedRecords({ org_id, startDate, endDate, targetUse
 
 
 
+export async function getCardRecords({ org_id, targetUserId, startDate, endDate }) {
+    const users = await getUsers({ org_id, targetUserId });
+    const records = await attendanceDB("attendance_records")
+        .where("org_id", org_id)
+        .whereRaw("DATE(time_in) >= ?", [startDate])
+        .whereRaw("DATE(time_in) <= ?", [endDate])
+        .modify(qb => { if (targetUserId) qb.where("user_id", targetUserId); });
+
+    const start = new Date(startDate + 'T00:00:00Z');
+    const end = new Date(endDate + 'T00:00:00Z');
+    const dateHeaders = [];
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+        dateHeaders.push(d.toISOString().split('T')[0]);
+    }
+
+    const list = [];
+    for (const u of users) {
+        const userRecs = records.filter(r => r.user_id === u.user_id);
+
+        for (const dateStr of dateHeaders) {
+            const dayRecs = userRecs.filter(r => {
+                const rDate = new Date(r.time_in).toISOString().split('T')[0];
+                return rDate === dateStr;
+            });
+
+            const aggregated = aggregateDayRecords(dayRecs, u.policy_rules);
+            const formattedDate = new Date(dateStr + 'T00:00:00Z').toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            });
+
+            let timeInImage = null;
+            let timeOutImage = null;
+
+            if (aggregated.time_in) {
+                const firstRec = [...dayRecs].sort((a, b) => new Date(a.time_in) - new Date(b.time_in))[0];
+                const lastRec = [...dayRecs].sort((a, b) => new Date(a.time_in) - new Date(b.time_in))[dayRecs.length - 1];
+
+                if (firstRec && firstRec.time_in_image_key) {
+                    try {
+                        const s3Res = await S3Service.getFileUrl({ key: firstRec.time_in_image_key });
+                        if (s3Res.success) timeInImage = s3Res.url;
+                    } catch (e) {
+                        console.error("S3 sign error", e);
+                    }
+                }
+                if (lastRec && lastRec.time_out_image_key) {
+                    try {
+                        const s3Res = await S3Service.getFileUrl({ key: lastRec.time_out_image_key });
+                        if (s3Res.success) timeOutImage = s3Res.url;
+                    } catch (e) {
+                        console.error("S3 sign error", e);
+                    }
+                }
+            }
+
+            const dayOfWeek = new Date(dateStr + 'T00:00:00Z').getUTCDay();
+            let status = aggregated.status;
+            if (!aggregated.time_in && status === "Absent") {
+                if (dayOfWeek === 0) status = "Sun";
+                else if (dayOfWeek === 6) status = "Sat";
+            }
+
+            // Calculate required hours from shift policy
+            const dayOfWeekNum = new Date(dateStr + 'T00:00:00Z').getUTCDay();
+            const isWeekendDay = dayOfWeekNum === 0 || dayOfWeekNum === 6;
+            const requiredHours = isWeekendDay ? 0 : getShiftHoursForUser(u);
+
+            list.push({
+                date: formattedDate,
+                rawDate: dateStr,
+                user_id: u.user_id,
+                user_name: u.user_name,
+                designation: u.desg_name || "-",
+                department: u.dept_name || "-",
+                status: status,
+                time_in: aggregated.time_in ? formatLocalTimeStr(aggregated.time_in) : "-",
+                time_out: aggregated.time_out ? formatLocalTimeStr(aggregated.time_out) : "-",
+                worked_hours: parseFloat(aggregated.worked_hours.toFixed(2)),
+                required_hours: parseFloat(requiredHours.toFixed(2)),
+                late_minutes: aggregated.late_minutes || 0,
+                time_in_address: aggregated.time_in_address || "-",
+                time_out_address: aggregated.time_out_address || "-",
+                time_in_image: timeInImage,
+                time_out_image: timeOutImage
+            });
+        }
+    }
+    return list;
+}
+
+
 export async function getPreviewData({ type, org_id, month, startDate, endDate, targetUserId, columns }) {
     const colsObj = typeof columns === 'string' ? JSON.parse(columns) : (columns || {});
     let data = { columns: [], rows: [] };
@@ -313,7 +407,7 @@ export async function getPreviewData({ type, org_id, month, startDate, endDate, 
             pushCol("Time In", "timeIn", 2);
             pushCol("Time Out", "timeOut", 3);
             pushCol("Work Hrs", "workedHours", 4);
-            cols.push("Status");
+            pushCol("Status", "status", 5);
             pushCol("In Location", "location", 6);
             pushCol("Out Location", "location", 7);
 
@@ -334,11 +428,7 @@ export async function getPreviewData({ type, org_id, month, startDate, endDate, 
 
                 const row = [fullRow[0], fullRow[1]];
                 colIndices.forEach(idx => {
-                    if (idx < 5) row.push(fullRow[idx]);
-                });
-                row.push(fullRow[5]); // Status
-                colIndices.forEach(idx => {
-                    if (idx >= 6) row.push(fullRow[idx]);
+                    row.push(fullRow[idx]);
                 });
                 return row;
             });
@@ -553,6 +643,11 @@ export async function getPreviewData({ type, org_id, month, startDate, endDate, 
             let dailyColspan = 0;
             const subCols = [];
             
+            if (colsObj.status !== false) {
+                dailyColspan++;
+                subCols.push({ label: "Status", key: "status" });
+            }
+            
             if (colsObj.timeIn !== false) {
                 dailyColspan++;
                 subCols.push({ label: "In Time", key: "timeIn" });
@@ -648,7 +743,8 @@ export async function getPreviewData({ type, org_id, month, startDate, endDate, 
                     const aggregated = aggregateDayRecords(dayRecs, u.policy_rules);
                     if (aggregated.time_in) {
                         subCols.forEach(sc => {
-                            if (sc.label === "In Time") userRow.push(formatLocalTimeStr(aggregated.time_in));
+                            if (sc.label === "Status") userRow.push(aggregated.status);
+                            else if (sc.label === "In Time") userRow.push(formatLocalTimeStr(aggregated.time_in));
                             else if (sc.label === "Out Time") userRow.push(formatLocalTimeStr(aggregated.time_out));
                             else if (sc.label === "Work Hrs") userRow.push(aggregated.worked_hours.toFixed(2));
                             else if (sc.label === "Req Hrs") {
@@ -671,7 +767,7 @@ export async function getPreviewData({ type, org_id, month, startDate, endDate, 
                         const day = d.getDay();
                         const statusStr = day === 0 ? "Sun" : day === 6 ? "Sat" : "Absent";
                         subCols.forEach((sc, scIdx) => {
-                            if (scIdx === 0) userRow.push(statusStr);
+                            if (sc.label === "Status") userRow.push(statusStr);
                             else userRow.push("-");
                         });
                     }
@@ -699,7 +795,7 @@ export async function getPreviewData({ type, org_id, month, startDate, endDate, 
         pushCol("Time In", "timeIn", 4);
         pushCol("Time Out", "timeOut", 5);
         pushCol("Work Hrs", "workedHours", 6);
-        cols.push("Status");
+        pushCol("Status", "status", 7);
         pushCol("In Location", "location", 8);
         pushCol("Out Location", "location", 9);
 
@@ -720,11 +816,7 @@ export async function getPreviewData({ type, org_id, month, startDate, endDate, 
 
             const row = [fullRow[0], fullRow[1], fullRow[2], fullRow[3]];
             colIndices.forEach(idx => {
-                if (idx < 7) row.push(fullRow[idx]);
-            });
-            row.push(fullRow[7]); // Status
-            colIndices.forEach(idx => {
-                if (idx >= 8) row.push(fullRow[idx]);
+                row.push(fullRow[idx]);
             });
             return row;
         });
@@ -899,6 +991,12 @@ export async function getPreviewData({ type, org_id, month, startDate, endDate, 
 
         data.columns = ["Name", "Email", "Phone", "Dept", "Designation", "Role"];
         data.rows = users.map(u => [u.user_name, u.email, u.phone_no, u.dept_name || "-", u.desg_name || "-", u.user_type]);
+    }
+
+    if (type !== "employee_master") {
+        data.cardRecords = await getCardRecords({ org_id, targetUserId, startDate, endDate });
+    } else {
+        data.cardRecords = [];
     }
 
     return data;

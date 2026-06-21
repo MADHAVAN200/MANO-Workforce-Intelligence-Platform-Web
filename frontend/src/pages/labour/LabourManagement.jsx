@@ -5,7 +5,7 @@ import { toast } from 'react-toastify';
 import {
     Hammer, Plus, Search, Building, Calendar, DollarSign, Clock,
     UserPlus, Edit2, Trash2, Save, AlertTriangle, CheckCircle,
-    XCircle, Info, HelpCircle, ChevronRight, User, Phone, Briefcase
+    XCircle, Info, HelpCircle, ChevronRight, User, Phone, Briefcase, X
 } from 'lucide-react';
 
 const LabourManagement = () => {
@@ -36,6 +36,7 @@ const LabourManagement = () => {
     const [gridData, setGridData] = useState([]);
     const [gridLoading, setGridLoading] = useState(false);
     const [gridMonthDetails, setGridMonthDetails] = useState(null);
+    const [showAllSitesAttendance, setShowAllSitesAttendance] = useState(false);
 
     // Modal Control States
     const [showSiteModal, setShowSiteModal] = useState(false);
@@ -51,6 +52,38 @@ const LabourManagement = () => {
 
     const [showAdvanceModal, setShowAdvanceModal] = useState(false);
     const [advanceForm, setAdvanceForm] = useState({ labour_id: '', name: '', amount: '', date: new Date().toISOString().split('T')[0], notes: '' });
+
+    // Phase 2 States
+    const [showBulkTransferModal, setShowBulkTransferModal] = useState(false);
+    const [bulkSourceSiteId, setBulkSourceSiteId] = useState('All');
+    const [bulkDestinationSiteId, setBulkDestinationSiteId] = useState('');
+    const [selectedLabourIds, setSelectedLabourIds] = useState([]);
+
+    const [showBorrowModal, setShowBorrowModal] = useState(false);
+    const [borrowSearchQuery, setBorrowSearchQuery] = useState('');
+
+    const [selectedHistoryLabour, setSelectedHistoryLabour] = useState(null);
+    const [labourHistoryData, setLabourHistoryData] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [showPayoutModal, setShowPayoutModal] = useState(false);
+    const [historyTab, setHistoryTab] = useState('sites'); // 'sites', 'payouts'
+    const [labourPayoutHistory, setLabourPayoutHistory] = useState([]);
+    const [payoutForm, setPayoutForm] = useState({
+        payout_id: null, labour_id: '', name: '', month: '', wage_type: '', monthly_salary: '',
+        present_days: 0, half_days: 0, absent_days: 0, paid_leaves: 0,
+        accrued_credit: 0, advances_taken: 0, net_payable: 0, paid_amount: '',
+        status: 'Paid', payment_date: new Date().toISOString().split('T')[0], notes: ''
+    });
+
+    const [financeMonth, setFinanceMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+    
+    const [showSiteClosurePrompt, setShowSiteClosurePrompt] = useState(false);
+    const [closureSiteId, setClosureSiteId] = useState('');
+    const [closureSiteName, setClosureSiteName] = useState('');
+    const [closureDestinationSiteId, setClosureDestinationSiteId] = useState('');
+    const [closureLabours, setClosureLabours] = useState([]);
+    const [siteStatusToSave, setSiteStatusToSave] = useState('');
+    const [siteFormToSave, setSiteFormToSave] = useState(null);
 
     // ==========================================
     // DATA FETCHING HANDLERS
@@ -84,7 +117,7 @@ const LabourManagement = () => {
 
     const fetchFinances = async () => {
         try {
-            const res = await labourService.getFinancesSummary();
+            const res = await labourService.getFinancesSummary(financeMonth ? `${financeMonth}-01` : '');
             setFinanceSummary(res.summary || []);
             setMonthDetails(res.monthDetails || null);
         } catch (err) {
@@ -96,7 +129,7 @@ const LabourManagement = () => {
         if (!gridSiteId || !gridMonth) return;
         setGridLoading(true);
         try {
-            const res = await labourService.getMonthlyGridAttendance(gridSiteId, gridMonth);
+            const res = await labourService.getMonthlyGridAttendance(gridSiteId, gridMonth, showAllSitesAttendance);
             setGridData(res.grid || []);
             setGridMonthDetails(res.monthDetails || null);
         } catch (err) {
@@ -110,11 +143,13 @@ const LabourManagement = () => {
         setLoading(true);
         if (tab === 'sites') {
             await fetchSites();
+            await fetchLabours(); // Load labours to count active assignments for deactivation check
         } else if (tab === 'labours') {
             await fetchSites();
             await fetchLabours();
         } else if (tab === 'attendance') {
             await fetchSites();
+            await fetchLabours(); // Load labours to show in borrow list
         } else if (tab === 'grid') {
             await fetchSites();
             await fetchGridData();
@@ -127,6 +162,12 @@ const LabourManagement = () => {
     useEffect(() => {
         loadTabInitialData(activeTab);
     }, [activeTab]);
+
+    useEffect(() => {
+        if (activeTab === 'finances') {
+            fetchFinances();
+        }
+    }, [financeMonth, activeTab]);
 
     // Load Attendance roster when site or date changes
     const loadAttendanceRoster = async () => {
@@ -152,7 +193,7 @@ const LabourManagement = () => {
         if (activeTab === 'grid') {
             fetchGridData();
         }
-    }, [gridSiteId, gridMonth, activeTab]);
+    }, [gridSiteId, gridMonth, showAllSitesAttendance, activeTab]);
 
     // ==========================================
     // SITE HANDLERS
@@ -162,6 +203,22 @@ const LabourManagement = () => {
         e.preventDefault();
         try {
             if (editingSite) {
+                // If status is changed from Active to Completed or Inactive, check for active labours
+                const statusChanged = editingSite.status === 'Active' && (siteForm.status === 'Completed' || siteForm.status === 'Inactive');
+                const siteLabours = statusChanged ? labours.filter(l => l.site_id === editingSite.site_id) : [];
+
+                if (statusChanged && siteLabours.length > 0) {
+                    setClosureSiteId(editingSite.site_id);
+                    setClosureSiteName(editingSite.site_name);
+                    setClosureLabours(siteLabours);
+                    setSiteStatusToSave(siteForm.status);
+                    setSiteFormToSave({ ...siteForm });
+                    setShowSiteModal(false);
+                    setClosureDestinationSiteId('');
+                    setShowSiteClosurePrompt(true);
+                    return;
+                }
+
                 await labourService.updateSite(editingSite.site_id, siteForm);
                 toast.success('Site updated successfully');
             } else {
@@ -175,6 +232,80 @@ const LabourManagement = () => {
         } catch (err) {
             toast.error(err.message || 'Failed to save site');
         }
+    };
+
+    const handleConfirmSiteClosure = async (e) => {
+        e.preventDefault();
+        try {
+            const labourIdsToTransfer = closureLabours.map(l => l.labour_id);
+            await labourService.bulkTransferLabours({
+                source_site_id: closureSiteId,
+                destination_site_id: closureDestinationSiteId ? Number(closureDestinationSiteId) : null,
+                labour_ids: labourIdsToTransfer
+            });
+
+            await labourService.updateSite(closureSiteId, siteFormToSave);
+            toast.success(`Site status updated. Transferred ${labourIdsToTransfer.length} workers.`);
+            setShowSiteClosurePrompt(false);
+            setEditingSite(null);
+            setSiteForm({ site_name: '', location_details: '', status: 'Active' });
+            fetchSites();
+            fetchLabours();
+        } catch (err) {
+            toast.error(err.message || 'Failed during site closure reassignment');
+        }
+    };
+
+    const handleExecuteBulkTransfer = async (e) => {
+        e.preventDefault();
+        if (selectedLabourIds.length === 0) {
+            toast.error('Please select at least one worker to transfer');
+            return;
+        }
+        try {
+            await labourService.bulkTransferLabours({
+                source_site_id: bulkSourceSiteId === 'All' ? null : Number(bulkSourceSiteId),
+                destination_site_id: bulkDestinationSiteId === 'Unassigned' || !bulkDestinationSiteId ? null : Number(bulkDestinationSiteId),
+                labour_ids: selectedLabourIds
+            });
+            toast.success(`Successfully transferred ${selectedLabourIds.length} workers.`);
+            setShowBulkTransferModal(false);
+            setSelectedLabourIds([]);
+            fetchLabours();
+        } catch (err) {
+            toast.error(err.message || 'Failed to transfer workers');
+        }
+    };
+
+    const handleViewHistory = async (lab) => {
+        setSelectedHistoryLabour(lab);
+        setHistoryTab('sites');
+        setHistoryLoading(true);
+        try {
+            const res = await labourService.getLabourWorkHistory(lab.labour_id);
+            setLabourHistoryData(res.history || []);
+            setLabourPayoutHistory(res.payouts || []);
+        } catch (err) {
+            toast.error(err.message || 'Failed to load work history');
+        }
+        setHistoryLoading(false);
+    };
+
+    const handleBorrowLabour = (lab) => {
+        setAttendanceRoster(prev => [
+            ...prev,
+            {
+                labour_id: lab.labour_id,
+                name: lab.name,
+                role: lab.role,
+                wage_type: lab.wage_type,
+                status: '',
+                is_borrowed: true
+            }
+        ]);
+        setShowBorrowModal(false);
+        setBorrowSearchQuery('');
+        toast.success(`${lab.name} added to today's daily checklist`);
     };
 
     const handleEditSite = (site) => {
@@ -208,7 +339,7 @@ const LabourManagement = () => {
             const payload = {
                 ...labourForm,
                 monthly_salary: Number(labourForm.monthly_salary),
-                allowed_leaves: labourForm.wage_type === 'Fixed Salary' ? Number(labourForm.allowed_leaves) : 0,
+                allowed_leaves: 0,
                 site_id: labourForm.site_id ? Number(labourForm.site_id) : null
             };
 
@@ -297,6 +428,12 @@ const LabourManagement = () => {
         return arr;
     };
 
+    const getMonthNameAndYear = (startDateStr) => {
+        if (!startDateStr) return '';
+        const date = new Date(startDateStr);
+        return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
+    };
+
     // ==========================================
     // FINANCES HANDLERS
     // ==========================================
@@ -326,6 +463,60 @@ const LabourManagement = () => {
             fetchFinances();
         } catch (err) {
             toast.error(err.message || 'Failed to log advance payment');
+        }
+    };
+
+    const handleOpenPayout = (row) => {
+        const monthKey = monthDetails?.start ? monthDetails.start.slice(0, 7) : new Date().toISOString().slice(0, 7);
+        const isExisting = !!row.payout;
+        
+        setPayoutForm({
+            payout_id: isExisting ? row.payout.payout_id : null,
+            labour_id: row.labour_id,
+            name: row.name,
+            month: monthKey,
+            wage_type: row.wage_type,
+            monthly_salary: row.monthly_salary,
+            present_days: row.attendance.present,
+            half_days: row.attendance.half_day,
+            absent_days: row.attendance.absent,
+            paid_leaves: row.attendance.paid_leave || 0,
+            accrued_credit: row.accrued_credit,
+            advances_taken: row.advances_taken,
+            net_payable: row.net_payable,
+            paid_amount: isExisting ? row.payout.paid_amount : row.net_payable,
+            status: isExisting ? row.payout.status : 'Paid',
+            payment_date: isExisting ? row.payout.payment_date.split('T')[0] : new Date().toISOString().split('T')[0],
+            notes: isExisting ? row.payout.notes || '' : ''
+        });
+        setShowPayoutModal(true);
+    };
+
+    const handleSavePayout = async (e) => {
+        e.preventDefault();
+        try {
+            await labourService.logLabourPayout({
+                labour_id: Number(payoutForm.labour_id),
+                month: payoutForm.month,
+                wage_type: payoutForm.wage_type,
+                monthly_salary: Number(payoutForm.monthly_salary),
+                present_days: Number(payoutForm.present_days),
+                half_days: Number(payoutForm.half_days),
+                absent_days: Number(payoutForm.absent_days),
+                paid_leaves: Number(payoutForm.paid_leaves),
+                accrued_credit: Number(payoutForm.accrued_credit),
+                advances_taken: Number(payoutForm.advances_taken),
+                net_payable: Number(payoutForm.net_payable),
+                paid_amount: Number(payoutForm.paid_amount),
+                status: payoutForm.status,
+                payment_date: payoutForm.payment_date,
+                notes: payoutForm.notes
+            });
+            toast.success(`Payout successfully processed for ${payoutForm.name}`);
+            setShowPayoutModal(false);
+            fetchFinances();
+        } catch (err) {
+            toast.error(err.message || 'Failed to log monthly payout');
         }
     };
 
@@ -420,9 +611,14 @@ const LabourManagement = () => {
                                                 </div>
 
                                                 <div className="flex justify-between items-center pt-3 border-t border-slate-100 dark:border-github-dark-border/40 text-xs">
-                                                    <span className="text-slate-400 dark:text-github-dark-muted text-[10px]">
-                                                        Created {new Date(site.created_at).toLocaleDateString()}
-                                                    </span>
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="text-slate-400 dark:text-github-dark-muted text-[10px]">
+                                                            Created {new Date(site.created_at).toLocaleDateString()}
+                                                        </span>
+                                                        <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
+                                                            👥 {labours.filter(l => l.site_id === site.site_id).length} Assigned
+                                                        </span>
+                                                    </div>
                                                     <div className="flex gap-2">
                                                         <button
                                                             onClick={() => handleEditSite(site)}
@@ -475,13 +671,27 @@ const LabourManagement = () => {
                                         </select>
                                     </div>
 
-                                    <button
-                                        onClick={() => { setEditingLabour(null); setLabourForm({ name: '', phone: '', sex: 'Male', role: '', wage_type: 'Daily Wage', monthly_salary: '', allowed_leaves: '0', site_id: '' }); setShowLabourModal(true); }}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all"
-                                    >
-                                        <UserPlus size={14} />
-                                        <span>Add Labour Worker</span>
-                                    </button>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => {
+                                                setSelectedLabourIds([]);
+                                                setBulkSourceSiteId('All');
+                                                setBulkDestinationSiteId('');
+                                                setShowBulkTransferModal(true);
+                                            }}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold shadow-sm transition-all border border-[#d0d7de] dark:border-[#30363d]"
+                                        >
+                                            <Building size={14} />
+                                            <span>Bulk Transfer</span>
+                                        </button>
+                                        <button
+                                            onClick={() => { setEditingLabour(null); setLabourForm({ name: '', phone: '', sex: 'Male', role: '', wage_type: 'Daily Wage', monthly_salary: '', allowed_leaves: '0', site_id: '' }); setShowLabourModal(true); }}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all"
+                                        >
+                                            <UserPlus size={14} />
+                                            <span>Add Labour Worker</span>
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl shadow-sm overflow-hidden">
@@ -493,7 +703,6 @@ const LabourManagement = () => {
                                                 <th className="p-3">Assigned Site</th>
                                                 <th className="p-3">Wage Model</th>
                                                 <th className="p-3">Monthly Salary</th>
-                                                <th className="p-3">Paid Leaves Limit</th>
                                                 <th className="p-3 text-right">Actions</th>
                                             </tr>
                                         </thead>
@@ -514,8 +723,11 @@ const LabourManagement = () => {
                                                 })
                                                 .map(lab => (
                                                     <tr key={lab.labour_id} className="border-b border-slate-100 dark:border-github-dark-border/50 hover:bg-slate-50/50 dark:hover:bg-slate-800/10">
-                                                        <td className="p-3 font-semibold text-slate-800 dark:text-github-dark-text">
-                                                            <div>{lab.name}</div>
+                                                        <td className="p-3 font-semibold text-slate-800 dark:text-github-dark-text cursor-pointer hover:text-indigo-650 dark:hover:text-indigo-400" onClick={() => handleViewHistory(lab)}>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span>{lab.name}</span>
+                                                                <Info size={12} className="text-slate-400" />
+                                                            </div>
                                                             <div className="text-[10px] text-slate-400 font-mono mt-0.5">{lab.phone || 'No phone'} | {lab.sex}</div>
                                                         </td>
                                                         <td className="p-3 text-slate-600 dark:text-slate-400">{lab.role}</td>
@@ -540,9 +752,6 @@ const LabourManagement = () => {
                                                         </td>
                                                         <td className="p-3 font-medium text-slate-700 dark:text-slate-300">
                                                             ₹{Number(lab.monthly_salary).toLocaleString()}
-                                                        </td>
-                                                        <td className="p-3 text-slate-600 dark:text-slate-400">
-                                                            {lab.wage_type === 'Fixed Salary' ? `${lab.allowed_leaves} days/mo` : 'N/A'}
                                                         </td>
                                                         <td className="p-3 text-right">
                                                             <div className="flex justify-end gap-1.5">
@@ -608,14 +817,23 @@ const LabourManagement = () => {
                                                 <span className="font-bold text-xs text-slate-800 dark:text-github-dark-text">Daily Roll Call Checklist</span>
                                                 <span className="ml-2 text-[10px] text-slate-450 dark:text-github-dark-muted font-mono">{attendanceRoster.length} workers registered</span>
                                             </div>
-                                            <button
-                                                disabled={attendanceRoster.length === 0}
-                                                onClick={handleSaveAttendance}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
-                                            >
-                                                <Save size={14} />
-                                                <span>Save Attendance</span>
-                                            </button>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setShowBorrowModal(true)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer border border-[#d0d7de] dark:border-[#30363d]"
+                                                >
+                                                    <Plus size={14} />
+                                                    <span>Borrow Worker</span>
+                                                </button>
+                                                <button
+                                                    disabled={attendanceRoster.length === 0}
+                                                    onClick={handleSaveAttendance}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
+                                                >
+                                                    <Save size={14} />
+                                                    <span>Save Attendance</span>
+                                                </button>
+                                            </div>
                                         </div>
 
                                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-5 bg-slate-50/30 dark:bg-transparent">
@@ -625,9 +843,12 @@ const LabourManagement = () => {
                                                 </div>
                                             ) : (
                                                 attendanceRoster.map(item => (
-                                                    <div key={item.labour_id} className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl p-4 flex flex-col justify-between gap-4 shadow-sm hover:shadow hover:border-slate-300 dark:hover:border-github-dark-border-strong transition-all duration-200">
+                                                    <div key={item.labour_id} className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl p-4 flex flex-col justify-between gap-4 shadow-sm hover:shadow hover:border-slate-300 dark:hover:border-github-dark-border-strong transition-all duration-200 relative overflow-hidden">
+                                                        {item.is_borrowed && (
+                                                            <span className="absolute top-0 right-0 bg-amber-500 text-white text-[8px] font-black px-2 py-0.5 rounded-bl uppercase">Borrowed</span>
+                                                        )}
                                                         <div>
-                                                            <h4 className="font-bold text-xs text-slate-800 dark:text-github-dark-text truncate">{item.name}</h4>
+                                                            <h4 className="font-bold text-xs text-slate-800 dark:text-github-dark-text truncate pr-12">{item.name}</h4>
                                                             <p className="text-[10px] text-slate-450 dark:text-github-dark-muted font-mono uppercase mt-0.5">{item.role}</p>
                                                         </div>
                                                         
@@ -674,6 +895,7 @@ const LabourManagement = () => {
                                             onChange={(e) => setGridSiteId(e.target.value)}
                                             className="px-3 py-2 bg-slate-50 dark:bg-github-dark-subtle/50 border border-slate-200 dark:border-github-dark-border rounded-lg text-xs font-semibold text-slate-700 dark:text-github-dark-text cursor-pointer focus:outline-none"
                                         >
+                                            <option value="All">💼 All Labours (All Sites)</option>
                                             {sites.map(s => (
                                                 <option key={s.site_id} value={s.site_id}>{s.site_name}</option>
                                             ))}
@@ -688,6 +910,23 @@ const LabourManagement = () => {
                                             className="px-3 py-1.5 bg-slate-50 dark:bg-github-dark-subtle/50 border border-slate-200 dark:border-github-dark-border rounded-lg text-xs font-semibold text-slate-700 dark:text-github-dark-text focus:outline-none"
                                         />
                                     </div>
+                                    {gridSiteId !== 'All' && (
+                                        <div className="flex-1 flex flex-col justify-center gap-1 min-w-[160px]">
+                                            <label className="text-[10px] uppercase font-bold text-slate-400">Other Sites</label>
+                                            <div className="flex items-center h-[34px]">
+                                                <label className="relative inline-flex items-center cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={showAllSitesAttendance}
+                                                        onChange={(e) => setShowAllSitesAttendance(e.target.checked)}
+                                                        className="sr-only peer"
+                                                    />
+                                                    <div className="w-9 h-5 bg-slate-200 dark:bg-github-dark-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-350 dark:after:border-none after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-650"></div>
+                                                    <span className="ml-2 text-xs font-semibold text-slate-600 dark:text-github-dark-text">Include attendance</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {gridLoading ? (
@@ -725,32 +964,49 @@ const LabourManagement = () => {
                                                         </tr>
                                                     ) : (
                                                         gridData.map(row => (
-                                                            <tr key={row.labour_id} className="border-b border-slate-150 dark:border-github-dark-border/40 hover:bg-slate-50/40 dark:hover:bg-slate-800/10">
+                                                             <tr key={row.labour_id} className="border-b border-slate-150 dark:border-github-dark-border/40 hover:bg-slate-50/40 dark:hover:bg-slate-800/10">
                                                                 <td className="p-4 sticky left-0 bg-white dark:bg-[#0d1117] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] border-r border-slate-200 dark:border-github-dark-border">
                                                                     <div className="font-bold text-slate-850 dark:text-github-dark-text text-xs">{row.name}</div>
                                                                     <div className="text-[9px] text-slate-400 dark:text-github-dark-muted font-mono mt-0.5">{row.role}</div>
                                                                 </td>
                                                                 {getDaysInMonthArray().map(day => {
-                                                                    const status = row.attendance[day.dateStr];
+                                                                    const attObj = row.attendance[day.dateStr];
+                                                                    const statusStr = attObj && typeof attObj === 'object' ? attObj.status : attObj;
+                                                                    const attSiteId = attObj && typeof attObj === 'object' ? attObj.site_id : null;
+                                                                    const attSiteName = attObj && typeof attObj === 'object' ? attObj.site_name : null;
+                                                                    
+                                                                    const isOtherSite = gridSiteId !== 'All' && attSiteId !== null && Number(attSiteId) !== Number(gridSiteId);
+                                                                    const tooltipText = isOtherSite 
+                                                                        ? `${statusStr} (at ${attSiteName})` 
+                                                                        : (gridSiteId === 'All' && attSiteName ? `${statusStr} (at ${attSiteName})` : statusStr);
+
                                                                     const dateObj = new Date(day.dateStr);
                                                                     const dayNum = dateObj.getDay();
                                                                     let cellContent = null;
                                                                     
-                                                                    if (status === 'Present') {
-                                                                        cellContent = (
-                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-500 text-white text-[9px] font-black shadow-sm" title="Present">P</span>
+                                                                    if (statusStr === 'Present') {
+                                                                        cellContent = isOtherSite ? (
+                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-50/90 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800/50 text-[9px] font-black shadow-sm" title={tooltipText}>P</span>
+                                                                        ) : (
+                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-emerald-500 text-white text-[9px] font-black shadow-sm" title={tooltipText}>P</span>
                                                                         );
-                                                                    } else if (status === 'Half Day') {
-                                                                        cellContent = (
-                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-amber-500 text-white text-[9px] font-black shadow-sm" title="Half Day">HD</span>
+                                                                    } else if (statusStr === 'Half Day') {
+                                                                        cellContent = isOtherSite ? (
+                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-amber-50/90 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-800/50 text-[9px] font-black shadow-sm" title={tooltipText}>HD</span>
+                                                                        ) : (
+                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-amber-500 text-white text-[9px] font-black shadow-sm" title={tooltipText}>HD</span>
                                                                         );
-                                                                    } else if (status === 'Absent') {
-                                                                        cellContent = (
-                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-black shadow-sm" title="Absent">A</span>
+                                                                    } else if (statusStr === 'Absent') {
+                                                                        cellContent = isOtherSite ? (
+                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-rose-50/90 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-300 dark:border-rose-800/50 text-[9px] font-black shadow-sm" title={tooltipText}>A</span>
+                                                                        ) : (
+                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-black shadow-sm" title={tooltipText}>A</span>
                                                                         );
-                                                                    } else if (status === 'Paid Leave') {
-                                                                        cellContent = (
-                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-indigo-500 text-white text-[9px] font-black shadow-sm" title="Paid Leave">PL</span>
+                                                                    } else if (statusStr === 'Paid Leave') {
+                                                                        cellContent = isOtherSite ? (
+                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-indigo-50/90 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-800/50 text-[9px] font-black shadow-sm" title={tooltipText}>PL</span>
+                                                                        ) : (
+                                                                            <span className="w-6 h-6 flex items-center justify-center rounded-full bg-indigo-500 text-white text-[9px] font-black shadow-sm" title={tooltipText}>PL</span>
                                                                         );
                                                                     } else if (dayNum === 6) { // Saturday
                                                                         cellContent = (
@@ -762,7 +1018,7 @@ const LabourManagement = () => {
                                                                         );
                                                                     } else {
                                                                         cellContent = (
-                                                                            <span className="text-slate-300 dark:text-slate-600">-</span>
+                                                                            <span className="text-slate-300 dark:text-slate-655">-</span>
                                                                         );
                                                                     }
                                                                     
@@ -774,8 +1030,8 @@ const LabourManagement = () => {
                                                                         </td>
                                                                     );
                                                                 })}
-                                                            </tr>
-                                                        ))
+                                                             </tr>
+                                                         ))
                                                     )}
                                                 </tbody>
                                             </table>
@@ -790,18 +1046,29 @@ const LabourManagement = () => {
                             ========================================== */}
                         {activeTab === 'finances' && (
                             <div className="space-y-6">
-                                <div className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border p-4 rounded-xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+                                <div className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border p-4 rounded-xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                                     <div>
                                         <h3 className="font-bold text-sm text-slate-800 dark:text-github-dark-text">Salary & Advance Ledger</h3>
                                         <p className="text-slate-450 dark:text-github-dark-muted text-[11px] mt-0.5">
                                             Dynamically pro-rated wage tracker. Pay scale totals recalculate daily based on marked attendance days.
                                         </p>
                                     </div>
-                                    {monthDetails && (
-                                        <div className="px-3 py-1.5 bg-slate-100 dark:bg-github-dark-border text-slate-600 dark:text-github-dark-text font-mono text-[10px] font-bold rounded-lg border border-slate-200 dark:border-github-dark-border/60">
-                                            🗓️ JUNE MONTHLY PERIOD: DAYS ELAPSED {monthDetails.elapsedDays} OF {monthDetails.totalDays}
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 text-xs">
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="text-[10px] text-slate-450 font-bold uppercase tracking-wider">Select Month:</span>
+                                            <input
+                                                type="month"
+                                                value={financeMonth}
+                                                onChange={(e) => setFinanceMonth(e.target.value)}
+                                                className="px-3 py-1.5 bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border rounded-lg text-xs font-bold text-slate-700 dark:text-github-dark-text focus:outline-none focus:border-indigo-500 cursor-pointer"
+                                            />
                                         </div>
-                                    )}
+                                        {monthDetails && (
+                                            <div className="px-3 py-1.5 bg-slate-100 dark:bg-github-dark-border text-slate-600 dark:text-github-dark-text font-mono text-[10px] font-bold rounded-lg border border-slate-200 dark:border-github-dark-border/60">
+                                                🗓️ {getMonthNameAndYear(monthDetails.start)} PERIOD: DAYS ELAPSED {monthDetails.elapsedDays} OF {monthDetails.totalDays}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
 
                                 <div className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl shadow-sm overflow-hidden">
@@ -815,13 +1082,14 @@ const LabourManagement = () => {
                                                 <th className="p-3 text-indigo-650 dark:text-indigo-400">Accrued Credit</th>
                                                 <th className="p-3 text-amber-600">Advances Taken</th>
                                                 <th className="p-3">Net Payable (Credits - Advances)</th>
+                                                <th className="p-3">Payout Status</th>
                                                 <th className="p-3 text-right pr-4">Action</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {financeSummary.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan="8" className="p-10 text-center text-slate-450 dark:text-github-dark-muted italic">
+                                                    <td colSpan="9" className="p-10 text-center text-slate-450 dark:text-github-dark-muted italic">
                                                         No active labours to compute ledger summaries for.
                                                     </td>
                                                 </tr>
@@ -856,13 +1124,41 @@ const LabourManagement = () => {
                                                                     )}
                                                                 </div>
                                                             </td>
+                                                            <td className="p-3">
+                                                                {row.payout ? (
+                                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                                                        row.payout.status === 'Paid'
+                                                                            ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border border-emerald-255 dark:border-emerald-900/30'
+                                                                            : 'bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-255 dark:border-amber-900/30'
+                                                                    }`}>
+                                                                        {row.payout.status === 'Paid' ? <CheckCircle size={10} /> : <Clock size={10} />}
+                                                                        <span>{row.payout.status}</span>
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                                                                        <span>Unprocessed</span>
+                                                                    </span>
+                                                                )}
+                                                            </td>
                                                             <td className="p-3 text-right pr-4">
-                                                                <button
-                                                                    onClick={() => handleOpenAdvance(row)}
-                                                                    className="px-2.5 py-1 text-[10px] font-bold bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 rounded transition-colors"
-                                                                >
-                                                                    Log Advance
-                                                                </button>
+                                                                <div className="flex justify-end gap-2">
+                                                                    <button
+                                                                        onClick={() => handleOpenAdvance(row)}
+                                                                        className="px-2.5 py-1 text-[10px] font-bold bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/35 rounded transition-colors"
+                                                                    >
+                                                                        Log Advance
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleOpenPayout(row)}
+                                                                        className={`px-2.5 py-1 text-[10px] font-bold rounded transition-colors ${
+                                                                            row.payout
+                                                                                ? 'bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-750'
+                                                                                : 'bg-indigo-650 dark:bg-indigo-700 text-white hover:bg-indigo-700'
+                                                                        }`}
+                                                                    >
+                                                                        {row.payout ? 'View Payout' : 'Release Salary'}
+                                                                    </button>
+                                                                </div>
                                                             </td>
                                                         </tr>
                                                     );
@@ -1038,19 +1334,6 @@ const LabourManagement = () => {
                                         placeholder="e.g., 25000"
                                     />
                                 </div>
-                                {labourForm.wage_type === 'Fixed Salary' && (
-                                    <div>
-                                        <label className="block text-slate-450 font-semibold mb-1">Allowed Paid Leaves (per month)</label>
-                                        <input
-                                            type="number"
-                                            value={labourForm.allowed_leaves}
-                                            onChange={(e) => setLabourForm({ ...labourForm, allowed_leaves: e.target.value })}
-                                            className="w-full px-3 py-2 bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border rounded-lg focus:outline-none"
-                                            min="0"
-                                            placeholder="e.g., 2"
-                                        />
-                                    </div>
-                                )}
                                 {editingLabour && (
                                     <div className="col-span-2">
                                         <label className="block text-slate-450 font-semibold mb-1">Status</label>
@@ -1151,6 +1434,553 @@ const LabourManagement = () => {
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                )}
+
+                {showPayoutModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+                        <div className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150">
+                            <div className="flex justify-between items-center p-4 border-b border-slate-100 dark:border-github-dark-border">
+                                <h4 className="font-bold text-sm text-slate-800 dark:text-github-dark-text flex items-center gap-1.5">
+                                    <DollarSign size={16} className="text-indigo-500" />
+                                    <span>{payoutForm.payout_id ? 'Update Monthly Payout' : 'Process Monthly Payout'}</span>
+                                </h4>
+                                <button onClick={() => setShowPayoutModal(false)} className="text-slate-400 hover:text-slate-650"><XCircle size={18} /></button>
+                            </div>
+                            
+                            <form onSubmit={handleSavePayout} className="p-4 space-y-4 text-xs">
+                                <div className="bg-indigo-50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-900/40 p-3 rounded-lg text-slate-600 dark:text-slate-350 space-y-1">
+                                    <div>Processing salary payout for <strong>{payoutForm.name}</strong></div>
+                                    <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 uppercase">Wage Type: {payoutForm.wage_type} | Month: {payoutForm.month}</div>
+                                </div>
+
+                                {/* Earnings Summary Grid */}
+                                <div className="grid grid-cols-2 gap-3 bg-slate-50 dark:bg-[#161b22] p-3 rounded-lg border border-slate-150 dark:border-github-dark-border text-[11px]">
+                                    <div className="space-y-0.5">
+                                        <div className="text-slate-400">Attendance:</div>
+                                        <div className="font-bold text-slate-700 dark:text-slate-300">
+                                            {payoutForm.present_days}P / {payoutForm.half_days}HD / {payoutForm.absent_days}A / {payoutForm.paid_leaves}PL
+                                        </div>
+                                    </div>
+                                    <div className="space-y-0.5">
+                                        <div className="text-slate-400">Accrued Credit:</div>
+                                        <div className="font-bold text-slate-700 dark:text-slate-300">₹{payoutForm.accrued_credit.toLocaleString()}</div>
+                                    </div>
+                                    <div className="space-y-0.5">
+                                        <div className="text-slate-400">Advances Taken:</div>
+                                        <div className="font-bold text-amber-600 dark:text-amber-500">-₹{payoutForm.advances_taken.toLocaleString()}</div>
+                                    </div>
+                                    <div className="space-y-0.5">
+                                        <div className="text-slate-450 font-bold">Net Payable:</div>
+                                        <div className="font-extrabold text-indigo-650 dark:text-indigo-400 text-xs">₹{payoutForm.net_payable.toLocaleString()}</div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-slate-450 font-semibold mb-1">Paid Amount (INR)</label>
+                                        <input
+                                            type="number"
+                                            value={payoutForm.paid_amount}
+                                            onChange={(e) => setPayoutForm({ ...payoutForm, paid_amount: e.target.value })}
+                                            className="w-full px-3 py-2 bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border rounded-lg focus:outline-none focus:border-indigo-500"
+                                            required
+                                            min="0"
+                                            placeholder="e.g. 15000"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-slate-450 font-semibold mb-1">Payout Status</label>
+                                        <select
+                                            value={payoutForm.status}
+                                            onChange={(e) => setPayoutForm({ ...payoutForm, status: e.target.value })}
+                                            className="w-full px-3 py-2 bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border rounded-lg focus:outline-none focus:border-indigo-500"
+                                        >
+                                            <option value="Paid">Paid</option>
+                                            <option value="Pending">Pending</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-slate-450 font-semibold mb-1">Payment Date</label>
+                                    <input
+                                        type="date"
+                                        value={payoutForm.payment_date}
+                                        onChange={(e) => setPayoutForm({ ...payoutForm, payment_date: e.target.value })}
+                                        className="w-full px-3 py-2 bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border rounded-lg focus:outline-none focus:border-indigo-500"
+                                        required
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-slate-450 font-semibold mb-1">Notes / Payment Details</label>
+                                    <input
+                                        type="text"
+                                        value={payoutForm.notes}
+                                        onChange={(e) => setPayoutForm({ ...payoutForm, notes: e.target.value })}
+                                        className="w-full px-3 py-2 bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border rounded-lg focus:outline-none focus:border-indigo-500"
+                                        placeholder="e.g. Paid via Bank Transfer, Ref# 9812739"
+                                    />
+                                </div>
+
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPayoutModal(false)}
+                                        className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-500 rounded-lg font-bold transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="flex-1 px-4 py-2 bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-sm transition-colors"
+                                    >
+                                        {payoutForm.payout_id ? 'Update Payout' : 'Release Payment'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* ==========================================
+                    MODAL: BULK TRANSFER
+                    ========================================== */}
+                {showBulkTransferModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+                        <div className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl shadow-xl w-full max-w-xl overflow-hidden animate-in zoom-in-95 duration-150">
+                            <div className="flex justify-between items-center p-4 border-b border-slate-100 dark:border-github-dark-border">
+                                <h4 className="font-bold text-sm text-slate-800 dark:text-github-dark-text flex items-center gap-1.5">
+                                    <Building size={16} className="text-indigo-500" />
+                                    <span>Bulk Transfer Workers</span>
+                                </h4>
+                                <button onClick={() => setShowBulkTransferModal(false)} className="text-slate-400 hover:text-slate-650 cursor-pointer"><XCircle size={18} /></button>
+                            </div>
+                            <form onSubmit={handleExecuteBulkTransfer} className="p-4 space-y-4 text-xs">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-slate-450 font-semibold mb-1">Source Site (Filter)</label>
+                                        <select
+                                            value={bulkSourceSiteId}
+                                            onChange={(e) => {
+                                                setBulkSourceSiteId(e.target.value);
+                                                setSelectedLabourIds([]); // reset selection
+                                            }}
+                                            className="w-full px-3 py-2 bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border rounded-lg focus:outline-none cursor-pointer"
+                                        >
+                                            <option value="All">All Sites</option>
+                                            <option value="Unassigned">Unassigned</option>
+                                            {sites.map(s => (
+                                                <option key={s.site_id} value={s.site_id}>{s.site_name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-slate-450 font-semibold mb-1">Destination Site</label>
+                                        <select
+                                            value={bulkDestinationSiteId}
+                                            onChange={(e) => setBulkDestinationSiteId(e.target.value)}
+                                            className="w-full px-3 py-2 bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border rounded-lg focus:outline-none cursor-pointer"
+                                            required
+                                        >
+                                            <option value="">-- Choose New Project Site --</option>
+                                            <option value="Unassigned">Unassigned / Independent</option>
+                                            {sites.map(s => (
+                                                <option key={s.site_id} value={s.site_id}>{s.site_name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <div className="flex justify-between items-center text-slate-450 font-semibold mb-1">
+                                        <span>Select Workers to Move</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const filtered = labours.filter(lab => {
+                                                    if (bulkSourceSiteId === 'Unassigned') return lab.site_id === null;
+                                                    if (bulkSourceSiteId !== 'All') return lab.site_id === Number(bulkSourceSiteId);
+                                                    return true;
+                                                });
+                                                if (selectedLabourIds.length === filtered.length) {
+                                                    setSelectedLabourIds([]);
+                                                } else {
+                                                    setSelectedLabourIds(filtered.map(l => l.labour_id));
+                                                }
+                                            }}
+                                            className="text-indigo-650 hover:underline"
+                                        >
+                                            Select / Deselect All
+                                        </button>
+                                    </div>
+
+                                    <div className="border border-slate-200 dark:border-github-dark-border rounded-lg max-h-48 overflow-y-auto p-2 bg-slate-50 dark:bg-[#161b22]/40 divide-y divide-slate-100 dark:divide-github-dark-border/40">
+                                        {labours
+                                            .filter(lab => {
+                                                if (bulkSourceSiteId === 'Unassigned') return lab.site_id === null;
+                                                if (bulkSourceSiteId !== 'All') return lab.site_id === Number(bulkSourceSiteId);
+                                                return true;
+                                            })
+                                            .map(lab => (
+                                                <label key={lab.labour_id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-slate-100/50 dark:hover:bg-slate-800/20 px-1">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedLabourIds.includes(lab.labour_id)}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) {
+                                                                setSelectedLabourIds(prev => [...prev, lab.labour_id]);
+                                                            } else {
+                                                                setSelectedLabourIds(prev => prev.filter(id => id !== lab.labour_id));
+                                                            }
+                                                        }}
+                                                        className="rounded text-indigo-650 cursor-pointer"
+                                                    />
+                                                    <div>
+                                                        <span className="font-semibold text-slate-800 dark:text-github-dark-text">{lab.name}</span>
+                                                        <span className="ml-2 text-[10px] text-slate-400 font-mono">({lab.role} | {lab.site_name || 'Unassigned'})</span>
+                                                    </div>
+                                                </label>
+                                            ))}
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowBulkTransferModal(false)}
+                                        className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-500 rounded-lg font-bold"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={selectedLabourIds.length === 0}
+                                        className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg font-bold shadow-sm"
+                                    >
+                                        Transfer {selectedLabourIds.length} Workers
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* ==========================================
+                    MODAL: BORROW/ADD FLOATING WORKER
+                    ========================================== */}
+                {showBorrowModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+                        <div className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150">
+                            <div className="flex justify-between items-center p-4 border-b border-slate-100 dark:border-github-dark-border">
+                                <h4 className="font-bold text-sm text-slate-800 dark:text-github-dark-text flex items-center gap-1.5">
+                                    <Plus size={16} className="text-indigo-500" />
+                                    <span>Borrow Worker for Today</span>
+                                </h4>
+                                <button onClick={() => setShowBorrowModal(false)} className="text-slate-400 hover:text-slate-650 cursor-pointer"><XCircle size={18} /></button>
+                            </div>
+                            <div className="p-4 space-y-4 text-xs">
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                    <input
+                                        type="text"
+                                        placeholder="Search worker by name or designation..."
+                                        value={borrowSearchQuery}
+                                        onChange={(e) => setBorrowSearchQuery(e.target.value)}
+                                        className="pl-9 pr-4 py-2 w-full bg-slate-50 dark:bg-github-dark-subtle/50 border border-slate-200 dark:border-github-dark-border rounded-lg text-xs text-slate-700 dark:text-github-dark-text focus:outline-none"
+                                    />
+                                </div>
+
+                                <div className="border border-slate-200 dark:border-github-dark-border rounded-lg max-h-60 overflow-y-auto p-1 bg-slate-50 dark:bg-[#161b22]/40 divide-y divide-slate-100 dark:divide-github-dark-border/40">
+                                    {labours
+                                        .filter(lab => {
+                                            const isAlreadyInRoster = attendanceRoster.some(r => r.labour_id === lab.labour_id);
+                                            const matchesSearch = lab.name.toLowerCase().includes(borrowSearchQuery.toLowerCase()) || 
+                                                lab.role.toLowerCase().includes(borrowSearchQuery.toLowerCase());
+                                            return !isAlreadyInRoster && matchesSearch && lab.status === 'Active';
+                                        })
+                                        .map(lab => (
+                                            <div
+                                                key={lab.labour_id}
+                                                onClick={() => handleBorrowLabour(lab)}
+                                                className="flex justify-between items-center p-2.5 cursor-pointer hover:bg-indigo-50 dark:hover:bg-slate-800 transition-colors"
+                                            >
+                                                <div>
+                                                    <span className="font-bold text-slate-800 dark:text-github-dark-text block">{lab.name}</span>
+                                                    <span className="text-[10px] text-slate-400 font-mono">{lab.role} | Default: {lab.site_name || 'Independent'}</span>
+                                                </div>
+                                                <button className="px-2.5 py-1 bg-indigo-50 border border-indigo-200 text-indigo-650 hover:bg-indigo-100 rounded text-[10px] font-black">
+                                                    Select
+                                                </button>
+                                            </div>
+                                        ))}
+                                    {labours.filter(lab => {
+                                        const isAlreadyInRoster = attendanceRoster.some(r => r.labour_id === lab.labour_id);
+                                        const matchesSearch = lab.name.toLowerCase().includes(borrowSearchQuery.toLowerCase()) || 
+                                            lab.role.toLowerCase().includes(borrowSearchQuery.toLowerCase());
+                                        return !isAlreadyInRoster && matchesSearch && lab.status === 'Active';
+                                    }).length === 0 && (
+                                        <div className="p-8 text-center text-slate-400 italic">No borrowable workers found.</div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* ==========================================
+                    MODAL: SITE CLOSURE REASSIGNMENT PROMPT
+                    ========================================== */}
+                {showSiteClosurePrompt && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+                        <div className="bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150">
+                            <div className="flex justify-between items-center p-4 border-b border-slate-100 dark:border-github-dark-border bg-amber-500/10 text-amber-800 dark:text-amber-400">
+                                <h4 className="font-bold text-sm flex items-center gap-1.5">
+                                    <AlertTriangle size={18} />
+                                    <span>Site Closure Reassignment</span>
+                                </h4>
+                                <button onClick={() => setShowSiteClosurePrompt(false)} className="text-slate-400 hover:text-slate-650 cursor-pointer"><XCircle size={18} /></button>
+                            </div>
+                            <form onSubmit={handleConfirmSiteClosure} className="p-4 space-y-4 text-xs">
+                                <div className="text-slate-600 dark:text-slate-350 space-y-2">
+                                    <p>
+                                        You are marking the site <strong>{closureSiteName}</strong> as <strong>{siteStatusToSave}</strong>.
+                                    </p>
+                                    <p>
+                                        There are currently <strong>{closureLabours.length} active workers</strong> assigned to this site. Please choose a new construction site to transfer them to:
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-slate-450 font-semibold mb-1">Select Destination Site</label>
+                                    <select
+                                        value={closureDestinationSiteId}
+                                        onChange={(e) => setClosureDestinationSiteId(e.target.value)}
+                                        className="w-full px-3 py-2 bg-slate-50 dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border rounded-lg focus:outline-none cursor-pointer"
+                                    >
+                                        <option value="">Leave Unassigned / Independent</option>
+                                        {sites
+                                            .filter(s => s.site_id !== Number(closureSiteId) && s.status === 'Active')
+                                            .map(s => (
+                                                <option key={s.site_id} value={s.site_id}>{s.site_name}</option>
+                                            ))}
+                                    </select>
+                                </div>
+
+                                <div className="border border-slate-200 dark:border-github-dark-border rounded-lg max-h-36 overflow-y-auto p-2 bg-slate-50 dark:bg-[#161b22]/40">
+                                    <span className="block text-[9px] font-bold text-slate-450 uppercase mb-1">Affected Workers:</span>
+                                    <ul className="list-disc pl-4 space-y-1">
+                                        {closureLabours.map(l => (
+                                            <li key={l.labour_id} className="text-slate-700 dark:text-slate-300 font-semibold">{l.name} <span className="text-[10px] text-slate-400 font-normal">({l.role})</span></li>
+                                        ))}
+                                    </ul>
+                                </div>
+
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowSiteClosurePrompt(false)}
+                                        className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-500 rounded-lg font-bold"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-sm"
+                                    >
+                                        Transfer & Complete
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* ==========================================
+                    SLIDE-OVER: WORK HISTORY & INSIGHTS
+                    ========================================== */}
+                {selectedHistoryLabour && (
+                    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white dark:bg-[#0d1117] border-l border-slate-200 dark:border-github-dark-border shadow-2xl flex flex-col justify-between animate-in slide-in-from-right duration-250">
+                        <div className="p-5 border-b border-slate-100 dark:border-github-dark-border flex justify-between items-center">
+                            <div>
+                                <h4 className="font-bold text-sm text-slate-800 dark:text-github-dark-text">{selectedHistoryLabour.name}</h4>
+                                <p className="text-[10px] text-slate-450 dark:text-github-dark-muted font-mono uppercase mt-0.5">Work History & Insights | {selectedHistoryLabour.role}</p>
+                            </div>
+                            <button onClick={() => setSelectedHistoryLabour(null)} className="text-slate-400 hover:text-slate-650 cursor-pointer"><XCircle size={20} /></button>
+                        </div>
+                        
+                        <div className="flex-1 p-5 overflow-y-auto space-y-6 text-xs">
+                            {historyLoading ? (
+                                <div className="flex flex-col items-center justify-center py-20 gap-2">
+                                    <Clock className="animate-spin text-indigo-500" size={24} />
+                                    <span className="text-[10px] text-slate-400">Loading history...</span>
+                                </div>
+                            ) : labourHistoryData.length === 0 ? (
+                                <div className="text-center py-10 text-slate-400 italic">No historical attendance logged for this worker.</div>
+                            ) : (
+                                <>
+                                    {/* Summary stats */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="bg-slate-50 dark:bg-github-dark-border/20 p-3 rounded-xl border border-slate-100 dark:border-github-dark-border/40">
+                                            <span className="block text-[10px] text-slate-405 uppercase font-bold mb-1">Total Engagements</span>
+                                            <span className="text-lg font-black text-slate-800 dark:text-github-dark-text">{labourHistoryData.length} Sites</span>
+                                        </div>
+                                        <div className="bg-slate-50 dark:bg-github-dark-border/20 p-3 rounded-xl border border-slate-100 dark:border-github-dark-border/40">
+                                            <span className="block text-[10px] text-slate-400 uppercase font-bold mb-1">Total Days Logged</span>
+                                            <span className="text-lg font-black text-indigo-650 dark:text-indigo-400">
+                                                {labourHistoryData.reduce((acc, curr) => acc + curr.total_days, 0)} Days
+                                            </span>
+                                        </div>
+                                    </div>
+                                    {/* Tab switcher inside the drawer */}
+                                    <div className="flex bg-[#f6f8fa] dark:bg-[#161b22] p-1 rounded-lg border border-[#d0d7de] dark:border-[#30363d] select-none">
+                                        <button
+                                            type="button"
+                                            onClick={() => setHistoryTab('sites')}
+                                            className={`flex-1 text-center py-1.5 font-bold rounded-md transition-all ${
+                                                historyTab === 'sites'
+                                                    ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-github-dark-text shadow-sm'
+                                                    : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
+                                            }`}
+                                        >
+                                            Site Timeline
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setHistoryTab('payouts')}
+                                            className={`flex-1 text-center py-1.5 font-bold rounded-md transition-all ${
+                                                historyTab === 'payouts'
+                                                    ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-github-dark-text shadow-sm'
+                                                    : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
+                                            }`}
+                                        >
+                                            Salary & Payout History
+                                        </button>
+                                    </div>
+
+                                    {historyTab === 'sites' ? (
+                                        /* Site distribution listing */
+                                        <div className="space-y-4">
+                                            <h5 className="font-bold text-slate-700 dark:text-github-dark-text uppercase tracking-wider text-[10px]">Site Wise Timeline</h5>
+                                            <div className="space-y-3">
+                                                {labourHistoryData.map((siteLog) => {
+                                                    const attendanceRate = siteLog.total_days > 0 
+                                                        ? Math.round(((siteLog.present_days + siteLog.paid_leave_days + (0.5 * siteLog.half_day_days)) / siteLog.total_days) * 100)
+                                                        : 0;
+
+                                                    return (
+                                                        <div key={siteLog.site_id} className="bg-white dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border p-4 rounded-xl shadow-sm hover:border-slate-350 dark:hover:border-github-dark-border-strong transition-all">
+                                                            <div className="flex justify-between items-start mb-2">
+                                                                <div>
+                                                                    <h6 className="font-bold text-xs text-slate-800 dark:text-github-dark-text">{siteLog.site_name || 'Unassigned'}</h6>
+                                                                    <span className="text-[9px] text-slate-400 font-mono">
+                                                                        {new Date(siteLog.first_date).toLocaleDateString()} to {new Date(siteLog.last_date).toLocaleDateString()}
+                                                                    </span>
+                                                                </div>
+                                                                <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 px-2 py-0.5 rounded-full">{attendanceRate}% Active</span>
+                                                            </div>
+                                                            
+                                                            {/* Status badges */}
+                                                            <div className="grid grid-cols-4 gap-1.5 text-center mt-3 pt-3 border-t border-slate-100 dark:border-github-dark-border/40 text-[9px] font-bold">
+                                                                <div className="bg-emerald-50 dark:bg-emerald-950/10 p-1.5 rounded-lg text-emerald-600 dark:text-emerald-400">
+                                                                    <span className="block text-[8px] uppercase text-slate-400 font-medium">Present</span>
+                                                                    {siteLog.present_days}
+                                                                </div>
+                                                                <div className="bg-amber-50 dark:bg-amber-950/10 p-1.5 rounded-lg text-amber-600 dark:text-amber-550 font-bold">
+                                                                    <span className="block text-[8px] uppercase text-slate-400 font-medium">Half Day</span>
+                                                                    {siteLog.half_day_days}
+                                                                </div>
+                                                                <div className="bg-indigo-50 dark:bg-indigo-950/10 p-1.5 rounded-lg text-indigo-650 dark:text-indigo-400">
+                                                                    <span className="block text-[8px] uppercase text-slate-400 font-medium">Paid L.</span>
+                                                                    {siteLog.paid_leave_days}
+                                                                </div>
+                                                                <div className="bg-rose-50 dark:bg-rose-950/10 p-1.5 rounded-lg text-rose-600 dark:text-rose-450">
+                                                                    <span className="block text-[8px] uppercase text-slate-400 font-medium">Absent</span>
+                                                                    {siteLog.absent_days}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        /* Salary & Payout History listing */
+                                        <div className="space-y-4">
+                                            <h5 className="font-bold text-slate-700 dark:text-github-dark-text uppercase tracking-wider text-[10px]">Monthly Payout History</h5>
+                                            {labourPayoutHistory.length === 0 ? (
+                                                <div className="text-center py-10 text-slate-400 dark:text-github-dark-muted italic">
+                                                    No monthly salary payouts closed or logged yet.
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-3">
+                                                    {labourPayoutHistory.map((payout) => {
+                                                        const pDate = new Date(payout.payment_date);
+                                                        const monthYearFormatted = getMonthNameAndYear(payout.month + '-01');
+                                                        return (
+                                                            <div key={payout.payout_id} className="bg-white dark:bg-[#161b22] border border-slate-200 dark:border-github-dark-border p-4 rounded-xl shadow-sm hover:border-slate-350 dark:hover:border-github-dark-border-strong transition-all space-y-3">
+                                                                <div className="flex justify-between items-start">
+                                                                    <div>
+                                                                        <h6 className="font-bold text-xs text-slate-800 dark:text-github-dark-text">{monthYearFormatted}</h6>
+                                                                        <span className="text-[9px] text-slate-400 font-mono">
+                                                                            Paid Date: {pDate.toLocaleDateString()}
+                                                                        </span>
+                                                                    </div>
+                                                                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                                                                        payout.status === 'Paid'
+                                                                            ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/30'
+                                                                            : 'bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/30'
+                                                                    }`}>
+                                                                        {payout.status}
+                                                                    </span>
+                                                                </div>
+
+                                                                {/* Summary Grid for historical metrics */}
+                                                                <div className="grid grid-cols-2 gap-2.5 bg-slate-50 dark:bg-[#1c2128] p-2.5 rounded-lg text-[10px] border border-slate-100 dark:border-github-dark-border/40">
+                                                                    <div>
+                                                                        <span className="text-slate-400 dark:text-slate-500 block">Wage Type:</span>
+                                                                        <span className="font-semibold text-slate-700 dark:text-slate-300">{payout.wage_type}</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-slate-400 dark:text-slate-500 block">Accrued Credit:</span>
+                                                                        <span className="font-bold text-slate-700 dark:text-slate-300">₹{payout.accrued_credit.toLocaleString()}</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-slate-400 dark:text-slate-500 block">Advances Settled:</span>
+                                                                        <span className="font-semibold text-amber-600 dark:text-amber-500">₹{payout.advances_taken.toLocaleString()}</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-slate-450 font-bold block">Actual Paid:</span>
+                                                                        <span className="font-black text-indigo-650 dark:text-indigo-400 text-xs">₹{payout.paid_amount.toLocaleString()}</span>
+                                                                    </div>
+                                                                    <div className="col-span-2 pt-1 border-t border-slate-200/50 dark:border-slate-800/40">
+                                                                        <span className="text-slate-400 dark:text-slate-500 block">Attendance Logged:</span>
+                                                                        <span className="font-medium text-slate-600 dark:text-slate-350">
+                                                                            {payout.present_days}P / {payout.half_days}HD / {payout.absent_days}A / {payout.paid_leaves}PL
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+
+                                                                {payout.notes && (
+                                                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/20 p-2 rounded border-l-2 border-slate-300 dark:border-github-dark-border italic">
+                                                                        Notes: {payout.notes}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                        
+                        <div className="p-4 border-t border-slate-100 dark:border-github-dark-border bg-slate-50 dark:bg-github-dark-border/10 flex justify-end">
+                            <button onClick={() => setSelectedHistoryLabour(null)} className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-bold cursor-pointer">Close Panel</button>
                         </div>
                     </div>
                 )}

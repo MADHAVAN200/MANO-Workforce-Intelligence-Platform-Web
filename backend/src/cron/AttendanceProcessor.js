@@ -70,6 +70,11 @@ export async function processHourlyAttendance() {
                 targetHour = parseInt(h, 10);
             }
 
+            // Shift target processing hour to a daytime hour (10:00 AM) if it falls at midnight or late night (12 AM - 5 AM)
+            if (targetHour >= 0 && targetHour <= 5) {
+                targetHour = 10;
+            }
+
             if (currentHour === targetHour) {
                 const yesterday = new Date(nowInUserTZ);
                 yesterday.setDate(yesterday.getDate() - 1);
@@ -206,14 +211,38 @@ async function escalateExpiredMissedPunches() {
 
     for (const record of records) {
         try {
-            // Fetch user and shift rules
+            // Fetch user, shift rules, and timezone settings
             const user = await attendanceDB('users')
                 .leftJoin('shifts', 'users.shift_id', 'shifts.shift_id')
+                .leftJoin('user_work_locations', 'users.user_id', 'user_work_locations.user_id')
+                .leftJoin('work_locations', 'user_work_locations.location_id', 'work_locations.location_id')
+                .leftJoin('organizations', 'users.org_id', 'organizations.org_id')
                 .where('users.user_id', record.user_id)
-                .select('shifts.*')
+                .select(
+                    'shifts.*',
+                    'work_locations.timezone',
+                    'organizations.timezone as org_timezone'
+                )
                 .first();
 
             if (!user) continue;
+
+            // Resolve timezone
+            let timeZone = user.org_timezone || 'UTC';
+            // Validate timezone
+            try {
+                Intl.DateTimeFormat(undefined, { timeZone });
+            } catch (e) {
+                timeZone = 'UTC';
+            }
+
+            const nowInUserTZ = new Date(new Date().toLocaleString('en-US', { timeZone }));
+            const currentHour = nowInUserTZ.getHours();
+
+            // Only run the escalation logic and send the "Attendance Marked Absent" notification at 10:00 AM in the user's local timezone
+            if (currentHour !== 10) {
+                continue;
+            }
 
             const rules = ShiftService.getShiftRules(user);
             const graceDays = rules.correction_deadline || 2;
@@ -281,9 +310,110 @@ async function escalateExpiredMissedPunches() {
 }
 
 /**
+ * Check if users need a time-in or time-out reminder (10 minutes before shift start/end)
+ */
+export async function checkAndSendShiftReminders() {
+    const users = await attendanceDB('users')
+        .leftJoin('shifts', 'users.shift_id', 'shifts.shift_id')
+        .leftJoin('user_work_locations', 'users.user_id', 'user_work_locations.user_id')
+        .leftJoin('work_locations', 'user_work_locations.location_id', 'work_locations.location_id')
+        .leftJoin('organizations', 'users.org_id', 'organizations.org_id')
+        .select(
+            'users.user_id',
+            'users.org_id',
+            'users.shift_id',
+            'shifts.*',
+            'work_locations.timezone',
+            'organizations.timezone as org_timezone'
+        );
+
+    for (const user of users) {
+        if (!user.shift_id) continue;
+
+        try {
+            const rules = ShiftService.getShiftRules(user);
+            const startTime = rules.shift_timing?.start_time; // e.g. "09:00:00"
+            const endTime = rules.shift_timing?.end_time; // e.g. "18:00:00"
+
+            if (!startTime || !endTime) continue;
+
+            let timeZone = user.org_timezone || 'UTC';
+            try {
+                Intl.DateTimeFormat(undefined, { timeZone });
+            } catch (e) {
+                timeZone = 'UTC';
+            }
+
+            const nowInUserTZ = new Date(new Date().toLocaleString('en-US', { timeZone }));
+            const currentHour = nowInUserTZ.getHours();
+            const currentMinute = nowInUserTZ.getMinutes();
+            const currentMinutes = currentHour * 60 + currentMinute;
+
+            // 1. Time-In Reminder (10 mins before start)
+            const [startH, startM] = startTime.split(':').map(Number);
+            const startMinutes = startH * 60 + startM;
+            const timeInReminderMinutes = (startMinutes - 10 + 1440) % 1440;
+
+            if (currentMinutes === timeInReminderMinutes) {
+                const yyyy = nowInUserTZ.getFullYear();
+                const mm = String(nowInUserTZ.getMonth() + 1).padStart(2, '0');
+                const dd = String(nowInUserTZ.getDate()).padStart(2, '0');
+                const dateStr = `${yyyy}-${mm}-${dd}`;
+
+                // Check if user has already timed in today
+                const record = await attendanceDB('attendance_records')
+                    .where({ user_id: user.user_id })
+                    .whereRaw('DATE(time_in) = ?', [dateStr])
+                    .first();
+
+                if (!record) {
+                    EventBus.emitNotification({
+                        org_id: user.org_id,
+                        user_id: user.user_id,
+                        title: "Time In Reminder",
+                        message: `Your shift starts in 10 minutes at ${startTime.substring(0, 5)}. Don't forget to time in!`,
+                        type: "INFO",
+                        related_entity_type: "ATTENDANCE",
+                        related_entity_id: null
+                    });
+                }
+            }
+
+            // 2. Time-Out Reminder (10 mins before end)
+            const [endH, endM] = endTime.split(':').map(Number);
+            const endMinutes = endH * 60 + endM;
+            const timeOutReminderMinutes = (endMinutes - 10 + 1440) % 1440;
+
+            if (currentMinutes === timeOutReminderMinutes) {
+                // Check if user has an active open session
+                const openSession = await attendanceDB('attendance_records')
+                    .where({ user_id: user.user_id })
+                    .whereNull('time_out')
+                    .first();
+
+                if (openSession) {
+                    EventBus.emitNotification({
+                        org_id: user.org_id,
+                        user_id: user.user_id,
+                        title: "Time Out Reminder",
+                        message: `Your shift ends in 10 minutes at ${endTime.substring(0, 5)}. Don't forget to time out!`,
+                        type: "INFO",
+                        related_entity_type: "ATTENDANCE",
+                        related_entity_id: null
+                    });
+                }
+            }
+        } catch (err) {
+            console.error(`Failed to process reminders for user ${user.user_id}:`, err);
+        }
+    }
+}
+
+/**
  * Initialize the hourly attendance processor cron job.
  */
 export function initAttendanceProcessor() {
     cron.schedule('0 * * * *', processHourlyAttendance);
+    cron.schedule('* * * * *', checkAndSendShiftReminders);
     console.log('🚀 Hourly Attendance Processor Scheduled');
 }

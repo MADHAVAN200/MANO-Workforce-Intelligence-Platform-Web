@@ -1,6 +1,7 @@
 import { attendanceDB } from '../../config/database.js';
 // S3 helper lives in the top-level services/s3 folder
 import * as S3Service from '../s3/s3Service.js';
+import EventBus from '../../utils/EventBus.js';
 
 export async function getMyHistory({ user_id, org_id }) {
     const leaves = await attendanceDB('leave_requests as lr')
@@ -131,6 +132,31 @@ export async function withdrawLeaveRequest({ id, user_id, org_id }) {
     }
 
     await attendanceDB('leave_requests').where({ lr_id: id }).del();
+
+    try {
+        const employee = await attendanceDB('users').where({ user_id }).select('user_name').first();
+        const employeeName = employee?.user_name || 'An employee';
+
+        const admins = await attendanceDB('users')
+            .where({ org_id, is_deleted: 0, is_active: 1 })
+            .whereIn('user_type', ['admin', 'hr'])
+            .select('user_id');
+
+        for (const admin of admins) {
+            if (Number(admin.user_id) === Number(user_id)) continue;
+            EventBus.emitNotification({
+                org_id,
+                user_id: admin.user_id,
+                title: 'Leave Request Withdrawn',
+                message: `${employeeName} has withdrawn their pending leave request for ${request.start_date} to ${request.end_date}.`,
+                type: 'WARNING',
+                related_entity_type: 'LEAVE',
+                related_entity_id: id
+            });
+        }
+    } catch (err) {
+        console.error('Error sending leave withdrawal notification:', err);
+    }
 }
 
 export async function getPendingRequests({ org_id }) {

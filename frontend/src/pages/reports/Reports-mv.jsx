@@ -840,9 +840,54 @@ const MobileReports = () => {
             empMap.get(record.user_id).records[record.rawDate] = record;
             dateSet.add(record.rawDate);
         });
+        const dates = Array.from(dateSet).sort();
+        const employees = Array.from(empMap.values());
+
+        // Calculate aggregate statistics for each employee based on the dates displayed
+        employees.forEach(emp => {
+            const stats = {
+                present: 0,
+                absent: 0,
+                leave: 0, // Note: Future version might split this into paid vs unpaid leaves
+                halfDay: 0,
+                weeklyOff: 0,
+                overtimeHrs: 0
+            };
+
+            dates.forEach(rawDate => {
+                const record = emp.records[rawDate];
+                if (!record) return;
+
+                const status = record.status || '';
+                const statusLower = status.toLowerCase();
+
+                if (status === 'Present' || statusLower.includes('present')) {
+                    stats.present += 1;
+                } else if (status === 'Absent' || statusLower.includes('absent')) {
+                    stats.absent += 1;
+                } else if (statusLower === 'on leave' || statusLower === 'leave') {
+                    stats.leave += 1;
+                } else if (statusLower === 'half day') {
+                    stats.halfDay += 1;
+                } else if (status === 'Sun' || status === 'Sat' || statusLower.includes('weekly off') || statusLower === 'wo') {
+                    stats.weeklyOff += 1;
+                } else if (statusLower.includes('late') || statusLower.includes('overtime')) {
+                    // Late/Overtime counts as present
+                    stats.present += 1;
+                }
+
+                const otHrs = parseFloat(record.overtime_hours);
+                if (!isNaN(otHrs) && otHrs > 0) {
+                    stats.overtimeHrs += otHrs;
+                }
+            });
+
+            emp.stats = stats;
+        });
+
         return {
-            employees: Array.from(empMap.values()),
-            dates: Array.from(dateSet).sort()
+            employees,
+            dates
         };
     }, [previewData.cardRecords]);
 
@@ -1362,6 +1407,30 @@ const MobileReports = () => {
                                                     </th>
                                                 );
                                             })}
+                                            <th className="py-1.5 px-1 text-center min-w-[40px] border-l border-slate-100 dark:border-white/10 bg-emerald-50/50 dark:bg-emerald-950/20">
+                                                <div className="text-[7px] uppercase text-slate-400 leading-none">Total</div>
+                                                <div className="text-xs font-black text-emerald-700 dark:text-emerald-400 leading-tight">P</div>
+                                            </th>
+                                            <th className="py-1.5 px-1 text-center min-w-[40px] bg-rose-50/50 dark:bg-rose-950/20">
+                                                <div className="text-[7px] uppercase text-slate-400 leading-none">Total</div>
+                                                <div className="text-xs font-black text-rose-700 dark:text-rose-400 leading-tight">A</div>
+                                            </th>
+                                            <th className="py-1.5 px-1 text-center min-w-[40px] bg-sky-50/50 dark:bg-sky-950/20">
+                                                <div className="text-[7px] uppercase text-slate-400 leading-none">Total</div>
+                                                <div className="text-xs font-black text-sky-700 dark:text-sky-400 leading-tight">L</div>
+                                            </th>
+                                            <th className="py-1.5 px-1 text-center min-w-[40px] bg-indigo-50/50 dark:bg-indigo-950/20">
+                                                <div className="text-[7px] uppercase text-slate-400 leading-none">Total</div>
+                                                <div className="text-xs font-black text-indigo-700 dark:text-indigo-400 leading-tight">HD</div>
+                                            </th>
+                                            <th className="py-1.5 px-1 text-center min-w-[40px] bg-slate-100/50 dark:bg-slate-800/40">
+                                                <div className="text-[7px] uppercase text-slate-400 leading-none">Total</div>
+                                                <div className="text-xs font-black text-slate-600 dark:text-slate-400 leading-tight">WO</div>
+                                            </th>
+                                            <th className="py-1.5 px-1 text-center min-w-[48px] bg-purple-50/50 dark:bg-purple-950/20">
+                                                <div className="text-[7px] uppercase text-slate-400 leading-none">Total</div>
+                                                <div className="text-xs font-black text-purple-700 dark:text-purple-400 leading-tight">OT (h)</div>
+                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50 dark:divide-white/5">
@@ -1398,6 +1467,24 @@ const MobileReports = () => {
                                                             </td>
                                                         );
                                                     })}
+                                                    <td className="px-1 py-2.5 text-center border-l border-slate-100 dark:border-white/10 bg-emerald-50/20 dark:bg-emerald-950/10 font-bold text-xs text-emerald-700 dark:text-emerald-400">
+                                                        {emp.stats?.present || 0}
+                                                    </td>
+                                                    <td className="px-1 py-2.5 text-center bg-rose-50/20 dark:bg-rose-950/10 font-bold text-xs text-rose-700 dark:text-rose-400">
+                                                        {emp.stats?.absent || 0}
+                                                    </td>
+                                                    <td className="px-1 py-2.5 text-center bg-sky-50/20 dark:bg-sky-950/10 font-bold text-xs text-sky-700 dark:text-sky-400">
+                                                        {emp.stats?.leave || 0}
+                                                    </td>
+                                                    <td className="px-1 py-2.5 text-center bg-indigo-50/20 dark:bg-indigo-950/10 font-bold text-xs text-indigo-700 dark:text-indigo-400">
+                                                        {emp.stats?.halfDay || 0}
+                                                    </td>
+                                                    <td className="px-1 py-2.5 text-center bg-slate-50 dark:bg-slate-800/20 font-bold text-xs text-slate-500 dark:text-slate-400">
+                                                        {emp.stats?.weeklyOff || 0}
+                                                    </td>
+                                                    <td className="px-1 py-2.5 text-center bg-purple-50/20 dark:bg-purple-950/10 font-bold text-xs text-purple-700 dark:text-purple-400">
+                                                        {emp.stats?.overtimeHrs ? emp.stats.overtimeHrs.toFixed(1) : '0.0'}
+                                                    </td>
                                                 </tr>
                                             );
                                         })}

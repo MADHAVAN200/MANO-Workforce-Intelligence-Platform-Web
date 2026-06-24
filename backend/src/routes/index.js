@@ -23,6 +23,7 @@ import superAdminRoutes from './superAdmin/superAdminRoutes.js';
 import chatbotRoutes from './chatbot/chatbotRoutes.js';
 import chatRoutes from './collaboration/chatRoutes.js';
 import labourRoutes from './labour/labourRoutes.js';
+import payrollRoutes from './payroll/payrollRoutes.js';
 
 import { requireActiveOrg } from '../middleware/auth.js';
 
@@ -54,6 +55,7 @@ router.use('/payment', paymentRoutes); // For Razorpay payments
 router.use('/profile', profileRoutes); // For user profile management
 router.use('/website-chatbot', chatbotRoutes); // Public website chatbot endpoint
 router.use('/collaboration', chatRoutes); // Real-time chat & messaging
+router.use('/payroll', payrollRoutes); // Payroll V1 endpoints
 
 router.get('/health', (req, res) => {
     res.json({ message: 'API is working' });

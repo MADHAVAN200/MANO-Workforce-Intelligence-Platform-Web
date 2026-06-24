@@ -104,6 +104,7 @@ export const aggregateDayRecords = (dayRecs, userPolicyRules) => {
     
     const worked_hours = sorted.reduce((sum, r) => sum + parseFloat(calculateWorkHours(r.time_in, r.time_out)), 0);
     const late_minutes = first.late_minutes || 0;
+    let overtime_hours = 0;
     
     let status = "Present";
     const hasLeave = sorted.some(r => r.status === 'ON_LEAVE');
@@ -117,7 +118,6 @@ export const aggregateDayRecords = (dayRecs, userPolicyRules) => {
         let statusParts = [];
         if (late_minutes > 0) statusParts.push("Late");
         
-        let overtime_hours = 0;
         if (userPolicyRules) {
             const rules = safeParseRules(userPolicyRules);
             overtime_hours = calculateOvertime(worked_hours, rules);
@@ -134,6 +134,7 @@ export const aggregateDayRecords = (dayRecs, userPolicyRules) => {
         time_out: last.time_out,
         worked_hours,
         late_minutes,
+        overtime_hours,
         status,
         time_in_address: first.time_in_address || "-",
         time_out_address: last.time_out_address || "-"
@@ -358,6 +359,7 @@ export async function getCardRecords({ org_id, targetUserId, startDate, endDate 
                 worked_hours: parseFloat(aggregated.worked_hours.toFixed(2)),
                 required_hours: parseFloat(requiredHours.toFixed(2)),
                 late_minutes: aggregated.late_minutes || 0,
+                overtime_hours: aggregated.overtime_hours || 0,
                 time_in_address: aggregated.time_in_address || "-",
                 time_out_address: aggregated.time_out_address || "-",
                 time_in_image: timeInImage,

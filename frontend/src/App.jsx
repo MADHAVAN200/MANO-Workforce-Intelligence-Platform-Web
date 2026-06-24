@@ -38,6 +38,7 @@ import DARAdmin from "./pages/dar/DARAdmin"
 import LeaveApplication from "./pages/holidays/LeaveApplication"
 import ChatPage from "./pages/collaboration/ChatPage";
 import LabourManagement from "./pages/labour/LabourManagement"
+import PayrollDashboard from "./pages/payroll/PayrollDashboard";
 
 // Organization Pages Imports
 
@@ -325,6 +326,7 @@ function App() {
               <Route path="/holidays/bulk" element={<ResponsiveRoute DesktopComponent={BulkHolidayImport} MobileComponent={MobileBulkHolidayImport} />} />
               <Route path="/dar-admin" element={<DARAdmin />} />
               <Route path="/labour-management" element={<ResponsiveRoute DesktopComponent={LabourManagement} MobileComponent={MobileLabourManagement} />} />
+              <Route path="/payroll" element={<ResponsiveRoute DesktopComponent={PayrollDashboard} MobileComponent={PayrollDashboard} />} />
             </Route>
 
             {/* Admin Only Routes */}

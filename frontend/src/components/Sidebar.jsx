@@ -77,6 +77,7 @@ const getNavItems = (userType) => {
         {icon: <MapPin size={18} />, text: "Geo Fencing", to: "/geofencing", roles: ['admin', 'hr'] },
         { icon: <Settings size={18} />, text: "Shift Management", to: "/shift-management", roles: ['admin', 'hr'] },
         { icon: <Calendar size={18} />, text: "Holidays and Leave", to: "/holidays", roles: ['admin', 'hr', 'employee'] },
+        { icon: <CreditCard size={18} />, text: "Payroll", to: "/payroll", roles: ['admin', 'hr'] },
         // { icon: <CreditCard size={18} />, text: "Subscription", to: "/subscription", roles: ['admin'] },
     ];
 

@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import DashboardLayout from '../../components/DashboardLayout';
 import { useAuth } from '../../context/AuthContext';
+import employeeService from '../../services/employeeService';
+import { parsePolicy } from '../../utils/weekOffPolicy';
 import {
     Calendar,
     Clock,
@@ -59,6 +61,36 @@ const EmployeeDashboard = () => {
     const [isLoading, setIsLoading] = useState(() => {
         return !attendanceCacheData.myStats[monthKey] || !attendanceCacheData.todayStatus[todayStr];
     });
+    const [shift, setShift] = useState(() => {
+        return attendanceCacheData.shiftPolicy?.shift || null;
+    });
+
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    const formatTime12h = (timeStr) => {
+        if (!timeStr) return '--:--';
+        const parts = timeStr.split(':');
+        if (parts.length < 2) return timeStr;
+        let hour = parseInt(parts[0], 10);
+        const minute = parts[1];
+        const ampm = hour >= 12 ? 'PM' : 'AM';
+        hour = hour % 12;
+        hour = hour ? hour : 12; // the hour '0' should be '12'
+        const strHour = hour < 10 ? '0' + hour : hour;
+        return `${strHour}:${minute} ${ampm}`;
+    };
+
+    const activeWorkingDays = (() => {
+        const policy = shift?.rules?.week_off_policy;
+        if (!policy) return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+        try {
+            const parsed = parsePolicy(policy);
+            return parsed.workingDays || [];
+        } catch (e) {
+            console.error("Failed to parse policy", e);
+            return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+        }
+    })();
 
     useEffect(() => {
         fetchDashboardData();
@@ -66,17 +98,21 @@ const EmployeeDashboard = () => {
 
     const fetchDashboardData = async () => {
         try {
-            const [statsRes, todayRes, holidaysRes, activityRes] = await Promise.all([
+            const [statsRes, todayRes, holidaysRes, activityRes, shiftRes] = await Promise.all([
                 attendanceService.getMyStats(),
                 attendanceService.getTodayStatus(),
                 attendanceService.getUpcomingHolidays(),
-                attendanceService.getRecentActivity()
+                attendanceService.getRecentActivity(),
+                employeeService.getMyShift()
             ]);
 
             if (statsRes.success) setStats(statsRes.data);
             if (todayRes.success) setTodayStatus(todayRes.data);
             if (holidaysRes.success) setUpcomingHolidays(holidaysRes.data);
             if (activityRes.success) setRecentActivity(activityRes.data);
+            if (shiftRes && (shiftRes.ok || shiftRes.success)) {
+                setShift(shiftRes.shift);
+            }
 
             // Fetch recent records to detect missed punches
             const recentRes = await attendanceService.getMyRecords();
@@ -277,34 +313,143 @@ const EmployeeDashboard = () => {
                     </div>
                 )}
 
-                {/* Today's Status Card */}
-                <div className="bg-white dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-github-dark-border">
-                    <h3 className="text-sm font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider mb-5 flex items-center gap-2">
-                        <Clock size={16} className="text-indigo-500" /> Today's Status
-                    </h3>
-                    <div className="flex flex-col sm:flex-row items-center justify-around gap-6">
-                        <div className="flex flex-col gap-1 text-center sm:text-left">
-                            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Check In</span>
-                            <span className={`text-2xl font-extrabold font-mono ${todayStatus?.time_in ? 'text-slate-800 dark:text-github-dark-text' : 'text-slate-350 dark:text-slate-600'}`}>
-                                {formatDashboardTime(todayStatus?.time_in)}
-                            </span>
+                {/* Shift Details & Today's Status */}
+                {shift ? (
+                    <>
+                        {/* Shift Details Card (Full Width) */}
+                        <div className="bg-white dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-github-dark-border">
+                            <h3 className="text-sm font-bold text-amber-500 uppercase tracking-wider mb-5 flex items-center gap-2">
+                                <Calendar size={16} className="text-amber-500" /> Shift Details
+                            </h3>
+                            <div className="flex flex-col md:flex-row items-center justify-between md:justify-around gap-6">
+                                <div className="flex flex-col gap-1 text-center md:text-left">
+                                    <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted tracking-[0.2em] uppercase">Shift Name</span>
+                                    <span className="text-base font-extrabold text-slate-800 dark:text-github-dark-text mt-1">
+                                        {shift.name}
+                                    </span>
+                                </div>
+                                <div className="hidden md:block h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
+                                <div className="flex flex-col gap-1 text-center md:text-left">
+                                    <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted tracking-[0.2em] uppercase">Start Time</span>
+                                    <span className="text-base font-extrabold text-slate-800 dark:text-github-dark-text font-mono mt-1">
+                                        {formatTime12h(shift.start_time || shift.rules?.shift_timing?.start_time)}
+                                    </span>
+                                </div>
+                                <div className="hidden md:block h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
+                                <div className="flex flex-col gap-1 text-center md:text-left">
+                                    <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted tracking-[0.2em] uppercase">End Time</span>
+                                    <span className="text-base font-extrabold text-slate-800 dark:text-github-dark-text font-mono mt-1">
+                                        {formatTime12h(shift.end_time || shift.rules?.shift_timing?.end_time)}
+                                    </span>
+                                </div>
+                                <div className="hidden md:block h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
+                                <div className="flex flex-col gap-1 text-center md:text-left">
+                                    <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted tracking-[0.2em] uppercase mb-1">Working Days</span>
+                                    <div className="flex flex-wrap gap-2 justify-center md:justify-start">
+                                        {weekdays.map(day => {
+                                            const active = activeWorkingDays.includes(day);
+                                            return (
+                                                <span
+                                                    key={day}
+                                                    className={`px-3 py-1 text-xs font-bold rounded-lg ${
+                                                        active 
+                                                            ? 'bg-indigo-600 text-white dark:bg-indigo-650/40 dark:text-indigo-200' 
+                                                            : 'bg-slate-100 text-slate-400 dark:bg-slate-800/80 dark:text-slate-500'
+                                                    }`}
+                                                >
+                                                    {day}
+                                                </span>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div className="hidden sm:block h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
-                        <div className="flex flex-col gap-1 text-center sm:text-left">
-                            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Check Out</span>
-                            <span className={`text-2xl font-extrabold font-mono ${todayStatus?.time_out ? 'text-slate-800 dark:text-github-dark-text' : 'text-slate-350 dark:text-slate-650'}`}>
-                                {formatDashboardTime(todayStatus?.time_out)}
-                            </span>
+
+                        {/* Today's Status Card (Full Width) */}
+                        <div className="bg-white dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-github-dark-border">
+                            <h3 className="text-sm font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider mb-5 flex items-center gap-2">
+                                <Clock size={16} className="text-indigo-500" /> Today's Status
+                            </h3>
+                            <div className="flex flex-col sm:flex-row items-center justify-around gap-6">
+                                <div className="flex flex-col gap-1 text-center sm:text-left">
+                                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Check In</span>
+                                    <span className={`text-2xl font-extrabold font-mono ${todayStatus?.time_in ? 'text-slate-800 dark:text-github-dark-text' : 'text-slate-350 dark:text-slate-600'}`}>
+                                        {formatDashboardTime(todayStatus?.time_in)}
+                                    </span>
+                                </div>
+                                <div className="hidden sm:block h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
+                                <div className="flex flex-col gap-1 text-center sm:text-left">
+                                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Check Out</span>
+                                    <span className={`text-2xl font-extrabold font-mono ${todayStatus?.time_out ? 'text-slate-800 dark:text-github-dark-text' : 'text-slate-350 dark:text-slate-650'}`}>
+                                        {formatDashboardTime(todayStatus?.time_out)}
+                                    </span>
+                                </div>
+                                <div className="hidden sm:block h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
+                                <div className="flex flex-col gap-1 text-center sm:text-left">
+                                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Duration</span>
+                                    <span className={`text-2xl font-extrabold font-mono ${todayStatus?.duration ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-350 dark:text-slate-650'}`}>
+                                        {todayStatus?.duration || '0h'}
+                                    </span>
+                                </div>
+                            </div>
                         </div>
-                        <div className="hidden sm:block h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
-                        <div className="flex flex-col gap-1 text-center sm:text-left">
-                            <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Duration</span>
-                            <span className={`text-2xl font-extrabold font-mono ${todayStatus?.duration ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-350 dark:text-slate-650'}`}>
-                                {todayStatus?.duration || '0h'}
-                            </span>
+                    </>
+                ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        {/* Shift Details (No Shift Assigned) */}
+                        <div className="bg-white dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-github-dark-border flex flex-col justify-between">
+                            <div>
+                                <h3 className="text-sm font-bold text-indigo-500 uppercase tracking-wider mb-5 flex items-center gap-2">
+                                    <Calendar size={16} className="text-indigo-500" /> Shift Details
+                                </h3>
+                                <div className="flex flex-col items-center justify-center text-center py-6">
+                                    <div className="relative w-16 h-16 rounded-full border border-slate-200 dark:border-slate-800 flex items-center justify-center mb-4 bg-slate-50/50 dark:bg-slate-800/20">
+                                        <Calendar className="text-slate-400 dark:text-slate-500" size={24} />
+                                        <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white dark:bg-dark-card border border-slate-200 dark:border-slate-850 flex items-center justify-center shadow-sm">
+                                            <Clock className="text-slate-400 dark:text-slate-500" size={12} />
+                                        </div>
+                                    </div>
+                                    <h4 className="text-base font-extrabold text-slate-800 dark:text-github-dark-text mb-1.5">No Shift Assigned</h4>
+                                    <p className="text-xs text-slate-500 dark:text-github-dark-muted leading-relaxed max-w-[220px]">
+                                        Your shift details will appear here once your administrator assigns a shift.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Today's Status Card (Takes remaining 2 columns) */}
+                        <div className="lg:col-span-2 bg-white dark:bg-dark-card rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-github-dark-border flex flex-col justify-between">
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider mb-5 flex items-center gap-2">
+                                    <Clock size={16} className="text-indigo-500" /> Today's Status
+                                </h3>
+                                <div className="flex flex-col sm:flex-row items-center justify-around gap-6 py-6">
+                                    <div className="flex flex-col gap-1 text-center sm:text-left">
+                                        <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Check In</span>
+                                        <span className={`text-2xl font-extrabold font-mono ${todayStatus?.time_in ? 'text-slate-800 dark:text-github-dark-text' : 'text-slate-350 dark:text-slate-650'}`}>
+                                            {formatDashboardTime(todayStatus?.time_in)}
+                                        </span>
+                                    </div>
+                                    <div className="hidden sm:block h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
+                                    <div className="flex flex-col gap-1 text-center sm:text-left">
+                                        <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Check Out</span>
+                                        <span className={`text-2xl font-extrabold font-mono ${todayStatus?.time_out ? 'text-slate-800 dark:text-github-dark-text' : 'text-slate-350 dark:text-slate-650'}`}>
+                                            {formatDashboardTime(todayStatus?.time_out)}
+                                        </span>
+                                    </div>
+                                    <div className="hidden sm:block h-10 w-px bg-slate-200 dark:bg-slate-700"></div>
+                                    <div className="flex flex-col gap-1 text-center sm:text-left">
+                                        <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Duration</span>
+                                        <span className={`text-2xl font-extrabold font-mono ${todayStatus?.duration ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-350 dark:text-slate-650'}`}>
+                                            {todayStatus?.duration || '0h'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
+                )}
 
                 {/* Quick Stats Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">

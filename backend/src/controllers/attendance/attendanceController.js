@@ -538,8 +538,8 @@ export async function getMyShift(req, res) {
       shift: {
         id: shift.shift_id,
         name: shift.shift_name,
-        start_time: shift.start_time,
-        end_time: shift.end_time,
+        start_time: shift.start_time || rules.shift_timing?.start_time,
+        end_time: shift.end_time || rules.shift_timing?.end_time,
         rules
       }
     });

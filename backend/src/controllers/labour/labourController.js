@@ -414,10 +414,14 @@ export const saveSiteAttendance = catchAsync(async (req, res) => {
 // ==========================================
 
 export const getFinancesSummary = catchAsync(async (req, res) => {
-    const { date } = req.query; // optional date to select month
-    const { start, end, totalDays, elapsedDays } = getMonthDetails(date);
+    const { site_id } = req.query; // Filter by site_id
 
-    // 1. Get all active labours and their associated sites
+    if (!site_id) {
+        throw new AppError('site_id is required', 400);
+    }
+
+    // 1. Get all active labours associated with this site
+    // (either primary site_id is this site, or in labour_site_relations)
     const labours = await attendanceDB('labours as l')
         .leftJoin('labour_site_relations as r', 'l.labour_id', 'r.labour_id')
         .leftJoin('labour_sites as s', 'r.site_id', 's.site_id')
@@ -427,6 +431,10 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
             attendanceDB.raw('GROUP_CONCAT(s.site_name SEPARATOR ", ") as site_names')
         )
         .where('l.status', 'Active')
+        .andWhere(function() {
+            this.where('l.site_id', Number(site_id))
+                .orWhere('r.site_id', Number(site_id));
+        })
         .groupBy('l.labour_id');
 
     if (labours.length === 0) {
@@ -438,34 +446,36 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
 
     const labourIds = labours.map(l => l.labour_id);
 
-    // 2. Fetch all attendance records for these labours in the current month
+    // 2. Fetch all attendance records for these labours ON THIS SITE
     const attendanceRecords = await attendanceDB('labour_attendance')
-        .where('date', '>=', start)
-        .andWhere('date', '<=', end)
         .whereIn('labour_id', labourIds)
+        .andWhere('site_id', Number(site_id))
         .select('labour_id', 'status', 'date');
 
-    // Group attendance by labour
+    // Group attendance by labour and month (to calculate correct monthly-based wage rates if Fixed Salary)
     const attendanceMap = {};
     labourIds.forEach(id => {
-        attendanceMap[id] = { Present: 0, Absent: 0, HalfDay: 0, PaidLeave: 0 };
+        attendanceMap[id] = {};
     });
 
     attendanceRecords.forEach(rec => {
         const counts = attendanceMap[rec.labour_id];
         if (counts) {
-            if (rec.status === 'Present') counts.Present += 1;
-            else if (rec.status === 'Absent') counts.Absent += 1;
-            else if (rec.status === 'Half Day') counts.HalfDay += 1;
-            else if (rec.status === 'Paid Leave') counts.PaidLeave += 1;
+            const monthKey = new Date(rec.date).toISOString().slice(0, 7); // YYYY-MM
+            if (!counts[monthKey]) {
+                counts[monthKey] = { Present: 0, Absent: 0, HalfDay: 0, PaidLeave: 0 };
+            }
+            if (rec.status === 'Present') counts[monthKey].Present += 1;
+            else if (rec.status === 'Absent') counts[monthKey].Absent += 1;
+            else if (rec.status === 'Half Day') counts[monthKey].HalfDay += 1;
+            else if (rec.status === 'Paid Leave') counts[monthKey].PaidLeave += 1;
         }
     });
 
-    // 3. Fetch advances logged for this month
+    // 3. Fetch advances logged for this site
     const advances = await attendanceDB('labour_advances')
-        .where('date', '>=', start)
-        .andWhere('date', '<=', end)
         .whereIn('labour_id', labourIds)
+        .andWhere('site_id', Number(site_id))
         .select('labour_id', 'amount');
 
     const advancesMap = {};
@@ -476,91 +486,118 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
         advancesMap[adv.labour_id] += Number(adv.amount);
     });
 
-    // 3.5 Fetch closed payouts logged for this month
-    const monthKey = start.slice(0, 7);
+    // 4. Fetch payouts logged for this site
     const payouts = await attendanceDB('labour_monthly_payouts')
-        .where('month', monthKey)
         .whereIn('labour_id', labourIds)
+        .andWhere('site_id', Number(site_id))
         .select('payout_id', 'labour_id', 'status', 'paid_amount', 'payment_date', 'notes');
 
-    const payoutsMap = {};
+    const totalPaidMap = {};
+    labourIds.forEach(id => {
+        totalPaidMap[id] = 0;
+    });
     payouts.forEach(p => {
-        payoutsMap[p.labour_id] = p;
+        if (p.status === 'Paid') {
+            totalPaidMap[p.labour_id] += Number(p.paid_amount);
+        }
     });
 
-    // 4. Compute dynamic credits
+    // 5. Compute dynamic credits
     const summary = labours.map(lab => {
-        const counts = attendanceMap[lab.labour_id] || { Present: 0, Absent: 0, HalfDay: 0, PaidLeave: 0 };
+        const monthlyAttendance = attendanceMap[lab.labour_id] || {};
         const totalAdvances = advancesMap[lab.labour_id] || 0;
+        const totalPaid = totalPaidMap[lab.labour_id] || 0;
         const monthlySalary = Number(lab.monthly_salary);
-        const dailyRate = lab.wage_type === 'Daily Wage'
-            ? monthlySalary
-            : (monthlySalary / totalDays);
 
         let accruedCredit = 0;
+        let totalPresent = 0;
+        let totalAbsent = 0;
+        let totalHalfDay = 0;
+        let totalPaidLeave = 0;
 
-        if (lab.wage_type === 'Daily Wage') {
-            // Paid strictly for present days (Half Day counts as 0.5)
-            const creditDays = counts.Present + (0.5 * counts.HalfDay);
-            accruedCredit = creditDays * dailyRate;
-        } else {
-            // Fixed Salary Mode:
-            // Deductions made only for unpaid absent days (Absent + 0.5 * Half Day)
-            // Paid Leave is supervisor approved and paid (no deduction)
-            // If they have absolutely zero attendance records of any status (Present, Half Day, Paid Leave, Absent) for the entire month, they accrue ₹0 credit.
-            const totalAttendanceRecords = counts.Present + counts.HalfDay + counts.PaidLeave + counts.Absent;
-            if (totalAttendanceRecords === 0) {
-                accruedCredit = 0;
-            } else {
-                const absentDaysCount = counts.Absent + (0.5 * counts.HalfDay);
-                const paidDays = Math.max(0, elapsedDays - absentDaysCount);
-                accruedCredit = paidDays * dailyRate;
+        Object.entries(monthlyAttendance).forEach(([monthKey, counts]) => {
+            totalPresent += counts.Present;
+            totalAbsent += counts.Absent;
+            totalHalfDay += counts.HalfDay;
+            totalPaidLeave += counts.PaidLeave;
+
+            const [yearStr, monthStr] = monthKey.split('-');
+            const year = Number(yearStr);
+            const monthIdx = Number(monthStr) - 1;
+            const endOfMonth = new Date(year, monthIdx + 1, 0);
+            const totalDays = endOfMonth.getDate();
+
+            // Calculate elapsed days for this month (if current month, only up to today)
+            const today = new Date();
+            let elapsedDays = totalDays;
+            if (today.getFullYear() === year && today.getMonth() === monthIdx) {
+                elapsedDays = today.getDate();
             }
-        }
 
-        // Round to nearest integer for clean display
+            const dailyRate = lab.wage_type === 'Daily Wage'
+                ? monthlySalary
+                : (monthlySalary / totalDays);
+
+            if (lab.wage_type === 'Daily Wage') {
+                const creditDays = counts.Present + (0.5 * counts.HalfDay);
+                accruedCredit += creditDays * dailyRate;
+            } else {
+                const totalAttendanceRecords = counts.Present + counts.HalfDay + counts.PaidLeave + counts.Absent;
+                if (totalAttendanceRecords > 0) {
+                    const absentDaysCount = counts.Absent + (0.5 * counts.HalfDay);
+                    const paidDays = Math.max(0, elapsedDays - absentDaysCount);
+                    accruedCredit += paidDays * dailyRate;
+                }
+            }
+        });
+
         accruedCredit = Math.round(accruedCredit);
-        const netPayable = accruedCredit - totalAdvances;
+        const netEarned = accruedCredit - totalPaid;
+        const netPayable = netEarned - totalAdvances;
 
         return {
             labour_id: lab.labour_id,
             name: lab.name,
             role: lab.role,
-            site_id: lab.primary_site_id,
+            site_id: Number(site_id),
             site_name: lab.site_names || 'Unassigned',
             site_ids: lab.site_ids ? lab.site_ids.split(',').map(Number) : [],
             wage_type: lab.wage_type,
             monthly_salary: monthlySalary,
             allowed_leaves: lab.allowed_leaves,
             attendance: {
-                present: counts.Present,
-                absent: counts.Absent,
-                half_day: counts.HalfDay,
-                paid_leave: counts.PaidLeave
+                present: totalPresent,
+                absent: totalAbsent,
+                half_day: totalHalfDay,
+                paid_leave: totalPaidLeave
             },
-            accrued_credit: accruedCredit,
-            advances_taken: totalAdvances,
-            net_payable: netPayable,
-            payout: payoutsMap[lab.labour_id] || null
+            accrued_credit: accruedCredit, // Total Earned (Site-specific)
+            total_paid: totalPaid,         // Total Paid (Site-specific)
+            net_earned: netEarned,         // Accrued to Pay (Site-specific)
+            advances_taken: totalAdvances, // Advances Taken (Site-specific)
+            net_payable: netPayable,       // Final Net Payable (Site-specific)
+            payout: payouts.find(p => p.labour_id === lab.labour_id) || null // For backwards compat
         };
     });
 
     res.json({
         success: true,
-        monthDetails: { start, end, totalDays, elapsedDays },
         summary
     });
 });
 
 export const logLabourAdvance = catchAsync(async (req, res) => {
-    const { labour_id, amount, date, notes } = req.body;
+    const { labour_id, amount, date, notes, site_id } = req.body;
 
     if (!labour_id || !amount || !date) {
         throw new AppError('labour_id, amount, and date are required', 400);
     }
 
+    const cleanSiteId = (site_id && site_id !== 'All') ? Number(site_id) : null;
+
     const [advance_id] = await attendanceDB('labour_advances').insert({
         labour_id,
+        site_id: cleanSiteId,
         amount: Number(amount),
         date,
         notes: notes || null
@@ -572,6 +609,113 @@ export const logLabourAdvance = catchAsync(async (req, res) => {
         advance_id
     });
 });
+
+// Helper function to calculate worker outstanding balances per site
+async function getLabourBalancesPerSite(labour_id) {
+    const worker = await attendanceDB('labours').where('labour_id', labour_id).first();
+    if (!worker) return [];
+
+    // Fetch all attendance for this worker
+    const attendance = await attendanceDB('labour_attendance')
+        .where('labour_id', labour_id)
+        .select('status', 'date', 'site_id');
+
+    // Group attendance by site and month
+    const siteAttendance = {};
+    attendance.forEach(rec => {
+        const sId = rec.site_id || 0;
+        if (!sId) return;
+        if (!siteAttendance[sId]) siteAttendance[sId] = {};
+        const monthKey = new Date(rec.date).toISOString().slice(0, 7);
+        if (!siteAttendance[sId][monthKey]) {
+            siteAttendance[sId][monthKey] = { Present: 0, HalfDay: 0, Absent: 0, PaidLeave: 0 };
+        }
+        if (rec.status === 'Present') siteAttendance[sId][monthKey].Present += 1;
+        else if (rec.status === 'Absent') siteAttendance[sId][monthKey].Absent += 1;
+        else if (rec.status === 'Half Day') siteAttendance[sId][monthKey].HalfDay += 1;
+        else if (rec.status === 'Paid Leave') siteAttendance[sId][monthKey].PaidLeave += 1;
+    });
+
+    // Fetch all advances
+    const advances = await attendanceDB('labour_advances')
+        .where('labour_id', labour_id)
+        .select('site_id', 'amount');
+
+    const siteAdvances = {};
+    advances.forEach(adv => {
+        const sId = adv.site_id || 0;
+        if (!siteAdvances[sId]) siteAdvances[sId] = 0;
+        siteAdvances[sId] += Number(adv.amount);
+    });
+
+    // Fetch all payouts
+    const payouts = await attendanceDB('labour_monthly_payouts')
+        .where('labour_id', labour_id)
+        .andWhere('status', 'Paid')
+        .select('site_id', 'paid_amount');
+
+    const sitePaid = {};
+    payouts.forEach(p => {
+        const sId = p.site_id || 0;
+        if (!sitePaid[sId]) sitePaid[sId] = 0;
+        sitePaid[sId] += Number(p.paid_amount);
+    });
+
+    const monthlySalary = Number(worker.monthly_salary);
+    const balances = [];
+
+    // Compute outstanding for each site
+    for (const sIdStr of Object.keys(siteAttendance)) {
+        const sId = Number(sIdStr);
+        let accruedCredit = 0;
+        const months = siteAttendance[sId];
+
+        Object.entries(months).forEach(([monthKey, counts]) => {
+            const [yearStr, monthStr] = monthKey.split('-');
+            const year = Number(yearStr);
+            const monthIdx = Number(monthStr) - 1;
+            const endOfMonth = new Date(year, monthIdx + 1, 0);
+            const totalDays = endOfMonth.getDate();
+
+            const today = new Date();
+            let elapsedDays = totalDays;
+            if (today.getFullYear() === year && today.getMonth() === monthIdx) {
+                elapsedDays = today.getDate();
+            }
+
+            const dailyRate = worker.wage_type === 'Daily Wage'
+                ? monthlySalary
+                : (monthlySalary / totalDays);
+
+            if (worker.wage_type === 'Daily Wage') {
+                const creditDays = counts.Present + (0.5 * counts.HalfDay);
+                accruedCredit += creditDays * dailyRate;
+            } else {
+                const totalAttendanceRecords = counts.Present + counts.HalfDay + counts.PaidLeave + counts.Absent;
+                if (totalAttendanceRecords > 0) {
+                    const absentDaysCount = counts.Absent + (0.5 * counts.HalfDay);
+                    const paidDays = Math.max(0, elapsedDays - absentDaysCount);
+                    accruedCredit += paidDays * dailyRate;
+                }
+            }
+        });
+
+        accruedCredit = Math.round(accruedCredit);
+        const advancesTaken = siteAdvances[sId] || 0;
+        const totalPaid = sitePaid[sId] || 0;
+        const outstanding = accruedCredit - totalPaid - advancesTaken;
+
+        balances.push({
+            site_id: sId,
+            accrued_credit: accruedCredit,
+            advances_taken: advancesTaken,
+            total_paid: totalPaid,
+            outstanding: Math.max(0, outstanding)
+        });
+    }
+
+    return balances;
+}
 
 export const getMonthlyGridAttendance = catchAsync(async (req, res) => {
     const { site_id, month, show_all_sites } = req.query; // month is format YYYY-MM
@@ -751,12 +895,11 @@ export const bulkCreateLabours = catchAsync(async (req, res) => {
             phonesInBatch.add(cleanPhone);
         }
 
-        // Resolve site_id if not explicitly provided but site_name is
-        let resolvedSiteId = null;
-        if (site_id) {
-            resolvedSiteId = Number(site_id);
-        } else if (site_name) {
-            resolvedSiteId = siteMap[site_name.trim().toLowerCase()] || null;
+        // Resolve site_id from site_name if site_id is not directly provided
+        let resolvedSiteId = site_id ? Number(site_id) : null;
+        if (!resolvedSiteId && site_name) {
+            const cleanSiteName = site_name.trim().toLowerCase();
+            resolvedSiteId = siteMap[cleanSiteName] || null;
         }
 
         return {
@@ -768,7 +911,9 @@ export const bulkCreateLabours = catchAsync(async (req, res) => {
             monthly_salary: Number(monthly_salary),
             allowed_leaves: Number(allowed_leaves) || 0,
             site_id: resolvedSiteId,
-            status: 'Active'
+            status: 'Active',
+            created_at: attendanceDB.fn.now(),
+            updated_at: attendanceDB.fn.now()
         };
     });
 
@@ -818,9 +963,26 @@ export const getLabourWorkHistory = catchAsync(async (req, res) => {
         .groupBy('a.site_id', 's.site_name')
         .orderBy('last_date', 'desc');
 
-    const payouts = await attendanceDB('labour_monthly_payouts')
-        .where('labour_id', id)
-        .orderBy('month', 'desc');
+    // Compute global all-time balance metrics
+    const balances = await getLabourBalancesPerSite(id);
+    let global_earned = 0;
+    let global_advances = 0;
+    let global_paid = 0;
+    
+    balances.forEach(b => {
+        global_earned += b.accrued_credit;
+        global_advances += b.advances_taken;
+        global_paid += b.total_paid;
+    });
+
+    const global_net_payable = global_earned - global_advances - global_paid;
+
+    const payouts = await attendanceDB('labour_monthly_payouts as p')
+        .leftJoin('labour_sites as s', 'p.site_id', 's.site_id')
+        .where('p.labour_id', id)
+        .select('p.*', 's.site_name')
+        .orderBy('p.payment_date', 'desc')
+        .orderBy('p.created_at', 'desc');
 
     res.json({
         success: true,
@@ -828,7 +990,13 @@ export const getLabourWorkHistory = catchAsync(async (req, res) => {
             labour_id: labour.labour_id,
             name: labour.name,
             role: labour.role,
-            status: labour.status
+            status: labour.status,
+            wage_type: labour.wage_type,
+            monthly_salary: Number(labour.monthly_salary),
+            global_earned,
+            global_advances,
+            global_paid,
+            global_net_payable
         },
         history,
         payouts
@@ -837,60 +1005,156 @@ export const getLabourWorkHistory = catchAsync(async (req, res) => {
 
 export const logLabourPayout = catchAsync(async (req, res) => {
     const {
-        labour_id, month, wage_type, monthly_salary,
+        payout_id, labour_id, site_id, month, wage_type, monthly_salary,
         present_days, half_days, absent_days, paid_leaves,
         accrued_credit, advances_taken, net_payable, paid_amount,
         status, payment_date, notes
     } = req.body;
 
-    if (!labour_id || !month || !wage_type || monthly_salary === undefined || accrued_credit === undefined || net_payable === undefined || !payment_date) {
-        throw new AppError('labour_id, month, wage_type, monthly_salary, accrued_credit, net_payable, and payment_date are required', 400);
+    if (!labour_id || monthly_salary === undefined || accrued_credit === undefined || net_payable === undefined || !payment_date) {
+        throw new AppError('labour_id, monthly_salary, accrued_credit, net_payable, and payment_date are required', 400);
     }
 
-    const existing = await attendanceDB('labour_monthly_payouts')
-        .where('labour_id', labour_id)
-        .andWhere('month', month)
-        .first();
+    // Helper to perform individual site payout insert/update
+    const saveSinglePayout = async (data) => {
+        const recordData = {
+            labour_id: data.labour_id,
+            site_id: data.site_id,
+            month: data.month || new Date(payment_date).toISOString().slice(0, 7),
+            wage_type: data.wage_type || 'Daily Wage',
+            monthly_salary: Number(data.monthly_salary),
+            present_days: Number(data.present_days || 0),
+            half_days: Number(data.half_days || 0),
+            absent_days: Number(data.absent_days || 0),
+            paid_leaves: Number(data.paid_leaves || 0),
+            accrued_credit: Number(data.accrued_credit),
+            advances_taken: Number(data.advances_taken || 0),
+            net_payable: Number(data.net_payable),
+            paid_amount: Number(data.paid_amount),
+            status: data.status || 'Paid',
+            payment_date,
+            notes: data.notes || null,
+            updated_at: attendanceDB.fn.now()
+        };
 
-    const recordData = {
-        labour_id,
-        month,
-        wage_type,
-        monthly_salary: Number(monthly_salary),
-        present_days: Number(present_days || 0),
-        half_days: Number(half_days || 0),
-        absent_days: Number(absent_days || 0),
-        paid_leaves: Number(paid_leaves || 0),
-        accrued_credit: Number(accrued_credit),
-        advances_taken: Number(advances_taken || 0),
-        net_payable: Number(net_payable),
-        paid_amount: Number(paid_amount !== undefined ? paid_amount : net_payable),
-        status: status || 'Paid',
-        payment_date,
-        notes: notes || null,
-        updated_at: attendanceDB.fn.now()
+        if (data.payout_id) {
+            await attendanceDB('labour_monthly_payouts')
+                .where('payout_id', data.payout_id)
+                .update(recordData);
+            return data.payout_id;
+        } else {
+            const [new_id] = await attendanceDB('labour_monthly_payouts').insert({
+                ...recordData,
+                created_at: attendanceDB.fn.now()
+            });
+            return new_id;
+        }
     };
 
-    if (existing) {
-        await attendanceDB('labour_monthly_payouts')
-            .where('payout_id', existing.payout_id)
-            .update(recordData);
-        
-        res.json({
+    // Edit case
+    if (payout_id) {
+        await saveSinglePayout({ ...req.body, payout_id });
+        return res.json({
             success: true,
-            message: 'Monthly payout updated successfully',
-            payout_id: existing.payout_id
+            message: 'Payout updated successfully',
+            payout_id
+        });
+    }
+
+    // New release case
+    const cleanSiteId = (site_id && site_id !== 'All') ? Number(site_id) : null;
+    const inputPaidAmount = Number(paid_amount);
+
+    if (cleanSiteId) {
+        // Direct payment to a single site
+        const new_id = await saveSinglePayout({
+            labour_id,
+            site_id: cleanSiteId,
+            month,
+            wage_type,
+            monthly_salary,
+            present_days,
+            half_days,
+            absent_days,
+            paid_leaves,
+            accrued_credit,
+            advances_taken,
+            net_payable,
+            paid_amount: inputPaidAmount,
+            status,
+            notes
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: 'Payout logged successfully',
+            payout_id: new_id
         });
     } else {
-        const [payout_id] = await attendanceDB('labour_monthly_payouts').insert({
-            ...recordData,
-            created_at: attendanceDB.fn.now()
-        });
-        
-        res.status(201).json({
+        // Global Payout / Auto-Distribution case
+        const balances = await getLabourBalancesPerSite(labour_id);
+        let remaining = inputPaidAmount;
+        const createdIds = [];
+
+        // Distribute to sites with outstanding balance
+        for (const bal of balances) {
+            if (remaining <= 0) break;
+            if (bal.outstanding <= 0) continue;
+
+            const alloc = Math.min(remaining, bal.outstanding);
+            
+            const new_id = await saveSinglePayout({
+                labour_id,
+                site_id: bal.site_id,
+                month,
+                wage_type,
+                monthly_salary,
+                present_days: 0,
+                half_days: 0,
+                absent_days: 0,
+                paid_leaves: 0,
+                accrued_credit: bal.accrued_credit,
+                advances_taken: bal.advances_taken,
+                net_payable: bal.outstanding,
+                paid_amount: alloc,
+                status,
+                notes: notes ? `${notes} (Auto-allocated)` : 'Auto-allocated from global payment'
+            });
+            
+            createdIds.push(new_id);
+            remaining -= alloc;
+        }
+
+        // If there is still remainder (overpayment), allocate to worker's primary site
+        if (remaining > 0) {
+            const worker = await attendanceDB('labours').where('labour_id', labour_id).first();
+            const primarySiteId = worker ? worker.site_id : null;
+            
+            const new_id = await saveSinglePayout({
+                labour_id,
+                site_id: primarySiteId,
+                month,
+                wage_type,
+                monthly_salary,
+                present_days: 0,
+                half_days: 0,
+                absent_days: 0,
+                paid_leaves: 0,
+                accrued_credit: 0,
+                advances_taken: 0,
+                net_payable: 0,
+                paid_amount: remaining,
+                status,
+                notes: notes ? `${notes} (Overpayment)` : 'Global overpayment allocation'
+            });
+            
+            createdIds.push(new_id);
+        }
+
+        return res.status(201).json({
             success: true,
-            message: 'Monthly payout logged successfully',
-            payout_id
+            message: `Global payout processed and split across ${createdIds.length} sites`,
+            payout_ids: createdIds
         });
     }
 });

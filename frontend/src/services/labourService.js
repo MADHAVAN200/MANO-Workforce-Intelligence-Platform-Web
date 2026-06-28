@@ -159,9 +159,9 @@ export const labourService = {
     // ==========================================
     // 4. FINANCIAL SERVICES
     // ==========================================
-    async getFinancesSummary(date = '') {
+    async getFinancesSummary(siteId) {
         try {
-            const res = await api.get(`/labour/finances/summary${date ? `?date=${date}` : ''}`);
+            const res = await api.get(`/labour/finances/summary?site_id=${siteId}`);
             return res.data;
         } catch (error) {
             throw new Error(error.response?.data?.message || 'Failed to fetch finances summary');

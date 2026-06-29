@@ -4,11 +4,18 @@ import { Building, Plus, Loader2, Save, X, Search, Calendar, Shield, Activity, C
 import api from '../../services/api';
 import { toast } from 'react-toastify';
 import { motion, AnimatePresence } from 'framer-motion';
+import PhoneInput from '../../components/PhoneInput';
+import { validatePhone, validateEmail } from '../../utils/validation';
 
 const OrgDetailModal = ({ org, onClose, onRefresh, listTab }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
-  const [formData, setFormData] = useState({ ...org, subscription_expiry: org.subscription_expiry ? new Date(org.subscription_expiry).toISOString().split('T')[0] : '' });
+  const [formData, setFormData] = useState({ 
+    ...org, 
+    gst_number: org.gst_number || '',
+    pan_number: org.pan_number || '',
+    subscription_expiry: org.subscription_expiry ? new Date(org.subscription_expiry).toISOString().split('T')[0] : '' 
+  });
   
   // Admins state
   const [orgAdmins, setOrgAdmins] = useState([]);
@@ -45,6 +52,14 @@ const OrgDetailModal = ({ org, onClose, onRefresh, listTab }) => {
   };
 
   const handleSaveAdmin = async (adminId) => {
+    if (!validateEmail(adminFormData.email)) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+    if (adminFormData.phone_no && !validatePhone(adminFormData.phone_no)) {
+      toast.error("Please enter a valid phone number according to the country code.");
+      return;
+    }
     try {
       await api.put(`/organizations/${org.org_id}/admins/${adminId}`, adminFormData);
       toast.success("Admin updated successfully");
@@ -56,9 +71,56 @@ const OrgDetailModal = ({ org, onClose, onRefresh, listTab }) => {
 
   const handleSaveOrg = async (e) => {
     e.preventDefault();
+    
+    // Validate organization code
+    const cleanCode = formData.org_code.trim().toUpperCase();
+    if (cleanCode.length < 3 || cleanCode.length > 10 || !/^[A-Z0-9]+$/.test(cleanCode)) {
+      toast.error("Organization code must be 3-10 alphanumeric characters with no spaces.");
+      return;
+    }
+
+    if (!validateEmail(formData.contact_email)) {
+      toast.error("Please enter a valid contact email address.");
+      return;
+    }
+    if (!validatePhone(formData.contact_phone)) {
+      toast.error("Please enter a valid contact phone number according to the country code.");
+      return;
+    }
+
+    // GST & PAN validation
+    const gst = (formData.gst_number || '').trim().toUpperCase();
+    const pan = (formData.pan_number || '').trim().toUpperCase();
+
+    if ((gst && !pan) || (!gst && pan)) {
+      toast.error("Please enter both GST and PAN, or leave both fields blank.");
+      return;
+    }
+
+    if (gst && pan) {
+      const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+      const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+
+      if (!gstRegex.test(gst)) {
+        toast.error("Please enter a valid GST number.");
+        return;
+      }
+      if (!panRegex.test(pan)) {
+        toast.error("Please enter a valid PAN number.");
+        return;
+      }
+    }
+
+    const payload = {
+      ...formData,
+      org_code: cleanCode,
+      gst_number: gst || null,
+      pan_number: pan || null
+    };
+
     setFormLoading(true);
     try {
-      await api.put(`/organizations/${org.org_id}`, formData);
+      await api.put(`/organizations/${org.org_id}`, payload);
       toast.success('Organization updated successfully');
       setIsEditing(false);
       onRefresh();
@@ -67,6 +129,30 @@ const OrgDetailModal = ({ org, onClose, onRefresh, listTab }) => {
       toast.error(error.response?.data?.message || 'Failed to save organization details');
     } finally {
       setFormLoading(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    try {
+      await api.put(`/organizations/${org.org_id}`, { status: 'active' });
+      toast.success('Organization approved successfully');
+      onRefresh();
+      onClose();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Approval failed');
+    }
+  };
+
+  const handleReject = async () => {
+    if (window.confirm("Are you sure you want to reject and delete this organization?")) {
+      try {
+        const res = await api.delete(`/organizations/${org.org_id}`);
+        toast.success(res.data.message || 'Organization rejected successfully');
+        onRefresh();
+        onClose();
+      } catch (error) {
+        toast.error(error.response?.data?.message || 'Rejection failed');
+      }
     }
   };
 
@@ -137,6 +223,10 @@ const OrgDetailModal = ({ org, onClose, onRefresh, listTab }) => {
                 <input required value={formData.org_name} onChange={(e) => setFormData({ ...formData, org_name: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" />
               </div>
               <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-wider">Org Code</label>
+                <input required value={formData.org_code} onChange={(e) => setFormData({ ...formData, org_code: e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase() })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm font-mono" placeholder="Organization Code (e.g. ACM01)" />
+              </div>
+              <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-wider">Plan</label>
                 <select value={formData.subscription_plan} onChange={(e) => setFormData({ ...formData, subscription_plan: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm">
                   <option value="Trial">Trial</option>
@@ -162,7 +252,19 @@ const OrgDetailModal = ({ org, onClose, onRefresh, listTab }) => {
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-wider">Contact Phone</label>
-                <input value={formData.contact_phone} onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" />
+                <PhoneInput
+                  value={formData.contact_phone}
+                  onChange={(val) => setFormData({ ...formData, contact_phone: val })}
+                  variant="admin-mobile"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-wider">GST Number</label>
+                <input value={formData.gst_number || ''} onChange={(e) => setFormData({ ...formData, gst_number: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm uppercase font-mono" placeholder="GST Number" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-wider">PAN Number</label>
+                <input value={formData.pan_number || ''} onChange={(e) => setFormData({ ...formData, pan_number: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm uppercase font-mono" placeholder="PAN Number" />
               </div>
             </div>
 
@@ -185,7 +287,7 @@ const OrgDetailModal = ({ org, onClose, onRefresh, listTab }) => {
                     <span className="text-[10px] font-bold text-slate-400 font-mono tracking-widest mt-1 block">CODE: {org.org_code}</span>
                   </div>
                 </div>
-                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${org.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>{org.status}</span>
+                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${org.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : org.status === 'pending_approval' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>{org.status}</span>
               </div>
             </div>
 
@@ -212,6 +314,14 @@ const OrgDetailModal = ({ org, onClose, onRefresh, listTab }) => {
               <div className="bg-slate-50 dark:bg-white/5 p-3 rounded-2xl border border-slate-100 dark:border-white/5">
                 <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Contact Email</span>
                 <span className="text-xs font-bold text-slate-800 dark:text-white truncate block">{org.contact_email || 'N/A'}</span>
+              </div>
+              <div className="bg-slate-50 dark:bg-white/5 p-3 rounded-2xl border border-slate-100 dark:border-white/5">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">GST Number</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-white font-mono truncate block">{org.gst_number || 'N/A'}</span>
+              </div>
+              <div className="bg-slate-50 dark:bg-white/5 p-3 rounded-2xl border border-slate-100 dark:border-white/5">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">PAN Number</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-white font-mono truncate block">{org.pan_number || 'N/A'}</span>
               </div>
             </div>
 
@@ -265,14 +375,25 @@ const OrgDetailModal = ({ org, onClose, onRefresh, listTab }) => {
               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Account Status Actions</h4>
               
               <div className="flex flex-wrap gap-2.5">
-                <button type="button" onClick={() => setIsEditing(true)} className="flex-1 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/25 dark:hover:bg-indigo-900/40 dark:text-indigo-300 rounded-xl text-[10px] font-bold uppercase tracking-widest border border-indigo-100 dark:border-white/5 flex items-center justify-center gap-1.5">
-                  <Pencil size={12} /> Edit Details
-                </button>
+                {listTab !== 'approval' && (
+                  <button type="button" onClick={() => setIsEditing(true)} className="flex-1 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-900/25 dark:hover:bg-indigo-900/40 dark:text-indigo-300 rounded-xl text-[10px] font-bold uppercase tracking-widest border border-indigo-100 dark:border-white/5 flex items-center justify-center gap-1.5">
+                    <Pencil size={12} /> Edit Details
+                  </button>
+                )}
 
                 {listTab === 'deleted' ? (
                   <button type="button" onClick={handleCancelDeletion} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-sm">
                     <RotateCcw size={12} /> Recover Org
                   </button>
+                ) : listTab === 'approval' ? (
+                  <>
+                    <button type="button" onClick={handleApprove} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-sm">
+                      Approve
+                    </button>
+                    <button type="button" onClick={handleReject} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-sm">
+                      Reject
+                    </button>
+                  </>
                 ) : (
                   <>
                     {org.status === 'active' ? (
@@ -304,14 +425,109 @@ const AddOrgModal = ({ onClose, onRefresh }) => {
   const [formData, setFormData] = useState({
     org_name: '', org_code: '', status: 'active', subscription_plan: 'Trial', subscription_expiry: '', grace_period_days: 0, max_users: 50,
     contact_name: '', contact_email: '', contact_phone: '',
-    admin_name: '', admin_email: '', admin_phone: '', admin_password: ''
+    admin_name: '', admin_email: '', admin_phone: '', admin_password: '',
+    gst_number: '', pan_number: ''
   });
+  const [isOrgCodeManuallyEdited, setIsOrgCodeManuallyEdited] = useState(false);
+
+  // Auto-generate organization code based on organization name
+  useEffect(() => {
+    if (!isOrgCodeManuallyEdited && formData.org_name) {
+      const name = formData.org_name;
+      const words = name.trim().split(/[\s\-_]+/).map(w => w.replace(/[^a-zA-Z0-9]/g, "")).filter(Boolean);
+      let code = "";
+      if (words.length >= 3) {
+        code = words.map(w => w[0]).join("");
+      } else if (words.length === 2) {
+        const firstWord = words[0];
+        const secondWord = words[1];
+        if (firstWord.length >= 2) {
+          code = firstWord.substring(0, 2) + secondWord.charAt(0);
+        } else {
+          code = firstWord.charAt(0) + secondWord.substring(0, 2);
+        }
+      } else if (words.length === 1) {
+        code = words[0];
+      }
+
+      let cleanCode = code.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+      if (cleanCode.length > 10) {
+        cleanCode = cleanCode.substring(0, 10);
+      }
+      if (cleanCode.length < 3 && cleanCode.length > 0) {
+        const originalClean = name.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+        if (originalClean.length >= 3) {
+          cleanCode = originalClean.substring(0, 5);
+        } else {
+          cleanCode = (cleanCode + "ORG").substring(0, 5);
+        }
+      }
+      if (cleanCode) {
+        setFormData(prev => ({ ...prev, org_code: cleanCode }));
+      }
+    }
+  }, [formData.org_name, isOrgCodeManuallyEdited]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validate organization code
+    const cleanCode = formData.org_code.trim().toUpperCase();
+    if (cleanCode.length < 3 || cleanCode.length > 10 || !/^[A-Z0-9]+$/.test(cleanCode)) {
+      toast.error("Organization code must be 3-10 alphanumeric characters with no spaces.");
+      return;
+    }
+
+    if (!validateEmail(formData.contact_email)) {
+      toast.error("Please enter a valid contact email address.");
+      return;
+    }
+    if (!validatePhone(formData.contact_phone)) {
+      toast.error("Please enter a valid contact phone number according to the country code.");
+      return;
+    }
+    if (!validateEmail(formData.admin_email)) {
+      toast.error("Please enter a valid admin email address.");
+      return;
+    }
+    if (formData.admin_phone && !validatePhone(formData.admin_phone)) {
+      toast.error("Please enter a valid admin phone number according to the country code.");
+      return;
+    }
+
+    // GST & PAN validation
+    const gst = (formData.gst_number || '').trim().toUpperCase();
+    const pan = (formData.pan_number || '').trim().toUpperCase();
+
+    if ((gst && !pan) || (!gst && pan)) {
+      toast.error("Please enter both GST and PAN, or leave both fields blank.");
+      return;
+    }
+
+    if (gst && pan) {
+      const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+      const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+
+      if (!gstRegex.test(gst)) {
+        toast.error("Please enter a valid GST number.");
+        return;
+      }
+      if (!panRegex.test(pan)) {
+        toast.error("Please enter a valid PAN number.");
+        return;
+      }
+    }
+
+    const payload = {
+      ...formData,
+      org_code: cleanCode,
+      gst_number: gst || null,
+      pan_number: pan || null
+    };
+
     setFormLoading(true);
     try {
-      await api.post('/organizations', formData);
+      await api.post('/organizations', payload);
       toast.success('Organization created successfully');
       onRefresh();
       onClose();
@@ -329,7 +545,7 @@ const AddOrgModal = ({ onClose, onRefresh }) => {
         {/* Drag Handle */}
         <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-850 rounded-full mx-auto mb-6" />
 
-        <button onClick={onClose} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-650 dark:hover:text-white rounded-full bg-slate-50 dark:bg-white/5"><X size={18} /></button>
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-655 dark:hover:text-white rounded-full bg-slate-50 dark:bg-white/5"><X size={18} /></button>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <h3 className="text-lg font-bold text-slate-900 dark:text-white uppercase tracking-tight">Onboard New Org</h3>
@@ -340,7 +556,7 @@ const AddOrgModal = ({ onClose, onRefresh }) => {
               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Organization Details</h4>
               <div className="space-y-2">
                 <input required value={formData.org_name} onChange={(e) => setFormData({ ...formData, org_name: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Organization Name" />
-                <input required value={formData.org_code} onChange={(e) => setFormData({ ...formData, org_code: e.target.value.toUpperCase() })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm font-mono" placeholder="Organization Code (e.g. ACM01)" />
+                <input required value={formData.org_code} onChange={(e) => { setIsOrgCodeManuallyEdited(true); setFormData({ ...formData, org_code: e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase() }); }} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm font-mono" placeholder="Organization Code (e.g. ACM01)" />
                 <select value={formData.subscription_plan} onChange={(e) => setFormData({ ...formData, subscription_plan: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm">
                   <option value="Trial">Trial</option>
                   <option value="Basic">Basic</option>
@@ -348,6 +564,8 @@ const AddOrgModal = ({ onClose, onRefresh }) => {
                 </select>
                 <input type="date" value={formData.subscription_expiry} onChange={(e) => setFormData({ ...formData, subscription_expiry: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Subscription Expiry" />
                 <input type="number" value={formData.max_users} onChange={(e) => setFormData({ ...formData, max_users: Number(e.target.value) })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Max Users limit (default 50)" />
+                <input value={formData.gst_number || ''} onChange={(e) => setFormData({ ...formData, gst_number: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm uppercase font-mono" placeholder="GST Number (Optional)" />
+                <input value={formData.pan_number || ''} onChange={(e) => setFormData({ ...formData, pan_number: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm uppercase font-mono" placeholder="PAN Number (Optional)" />
               </div>
             </div>
 
@@ -357,7 +575,12 @@ const AddOrgModal = ({ onClose, onRefresh }) => {
               <div className="space-y-2">
                 <input value={formData.contact_name} onChange={(e) => setFormData({ ...formData, contact_name: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Contact Name" />
                 <input type="email" value={formData.contact_email} onChange={(e) => setFormData({ ...formData, contact_email: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Contact Email" />
-                <input value={formData.contact_phone} onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Contact Phone" />
+                <PhoneInput
+                  value={formData.contact_phone}
+                  onChange={(val) => setFormData({ ...formData, contact_phone: val })}
+                  variant="admin-mobile"
+                  placeholder="Contact Phone"
+                />
               </div>
             </div>
 
@@ -367,7 +590,12 @@ const AddOrgModal = ({ onClose, onRefresh }) => {
               <div className="space-y-2">
                 <input required value={formData.admin_name} onChange={(e) => setFormData({ ...formData, admin_name: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Admin Name" />
                 <input required type="email" value={formData.admin_email} onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Admin Email" />
-                <input value={formData.admin_phone} onChange={(e) => setFormData({ ...formData, admin_phone: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Admin Phone (optional)" />
+                <PhoneInput
+                  value={formData.admin_phone}
+                  onChange={(val) => setFormData({ ...formData, admin_phone: val })}
+                  variant="admin-mobile"
+                  placeholder="Admin Phone (optional)"
+                />
                 <input required type="password" value={formData.admin_password} onChange={(e) => setFormData({ ...formData, admin_password: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-sm" placeholder="Secure Password" />
               </div>
             </div>
@@ -415,9 +643,10 @@ const OrganizationListMobile = () => {
     o.org_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     o.org_code.toLowerCase().includes(searchQuery.toLowerCase());
 
-  const activeOrgs = organizations.filter(o => !isPendingDeletion(o) && matchesSearch(o));
+  const activeOrgs = organizations.filter(o => o.status !== 'pending_approval' && !isPendingDeletion(o) && matchesSearch(o));
+  const approvalOrgs = organizations.filter(o => o.status === 'pending_approval' && !isPendingDeletion(o) && matchesSearch(o));
   const pendingOrgs = organizations.filter(o => isPendingDeletion(o) && matchesSearch(o));
-  const displayedOrgs = listTab === 'active' ? activeOrgs : pendingOrgs;
+  const displayedOrgs = listTab === 'active' ? activeOrgs : listTab === 'approval' ? approvalOrgs : pendingOrgs;
 
   return (
     <MobileDashboardLayout title="Organizations">
@@ -439,22 +668,39 @@ const OrganizationListMobile = () => {
             </div>
 
             {/* Tabs */}
-            <div className="bg-slate-200/50 dark:bg-github-dark-border/50 p-1.5 flex rounded-2xl backdrop-blur-md border border-white/20 dark:border-white/5">
+            <div className="bg-[#f6f8fa] dark:bg-github-dark-subtle p-1.5 flex rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm">
               <button
                 type="button"
                 onClick={() => setListTab('active')}
                 className={`flex-1 py-2.5 text-[11px] font-bold rounded-xl uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
                   listTab === 'active'
-                    ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 transform scale-[1.02] shadow-sm'
-                    : 'text-slate-500 dark:text-github-dark-muted hover:bg-white/50 dark:hover:bg-slate-800/50'
+                    ? 'bg-white dark:bg-[#21262d] text-indigo-600 dark:text-indigo-400 transform scale-[1.02] shadow-sm border border-slate-200 dark:border-github-dark-border'
+                    : 'text-slate-500 dark:text-github-dark-muted hover:bg-slate-100 dark:hover:bg-[#21262d]/50'
                 }`}
               >
                 <span>Active</span>
                 <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
                   listTab === 'active'
-                    ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300'
-                    : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                    ? 'bg-indigo-50 text-indigo-605 dark:bg-indigo-900/40 dark:text-indigo-300'
+                    : 'bg-slate-200 text-slate-600 dark:bg-[#21262d] dark:border-github-dark-border border'
                 }`}>{activeOrgs.length}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setListTab('approval')}
+                className={`flex-1 py-2.5 text-[11px] font-bold rounded-xl uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+                  listTab === 'approval'
+                    ? 'bg-white dark:bg-[#21262d] text-violet-600 dark:text-violet-400 transform scale-[1.02] shadow-sm border border-slate-200 dark:border-github-dark-border'
+                    : 'text-slate-500 dark:text-github-dark-muted hover:bg-slate-100 dark:hover:bg-[#21262d]/50'
+                }`}
+              >
+                <span>Approval</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
+                  listTab === 'approval'
+                    ? 'bg-violet-50 text-violet-605 dark:bg-violet-900/40 dark:text-violet-300'
+                    : 'bg-slate-200 text-slate-600 dark:bg-[#21262d] dark:border-github-dark-border border'
+                }`}>{approvalOrgs.length}</span>
               </button>
 
               <button
@@ -462,15 +708,15 @@ const OrganizationListMobile = () => {
                 onClick={() => setListTab('deleted')}
                 className={`flex-1 py-2.5 text-[11px] font-bold rounded-xl uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
                   listTab === 'deleted'
-                    ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 transform scale-[1.02] shadow-sm'
-                    : 'text-slate-500 dark:text-github-dark-muted hover:bg-white/50 dark:hover:bg-slate-800/50'
+                    ? 'bg-white dark:bg-[#21262d] text-amber-600 dark:text-amber-400 transform scale-[1.02] shadow-sm border border-slate-200 dark:border-github-dark-border'
+                    : 'text-slate-500 dark:text-github-dark-muted hover:bg-slate-100 dark:hover:bg-[#21262d]/50'
                 }`}
               >
                 <span>Deleted</span>
                 <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
                   listTab === 'deleted'
-                    ? 'bg-amber-50 text-amber-600 dark:bg-amber-900/40 dark:text-amber-300'
-                    : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                    ? 'bg-amber-50 text-amber-605 dark:bg-amber-900/40 dark:text-amber-300'
+                    : 'bg-slate-200 text-slate-600 dark:bg-[#21262d] dark:border-github-dark-border border'
                 }`}>{pendingOrgs.length}</span>
               </button>
             </div>
@@ -512,6 +758,7 @@ const OrganizationListMobile = () => {
 
                   <span className={`shrink-0 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
                     org.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                    org.status === 'pending_approval' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' :
                     'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                   }`}>{org.status}</span>
                 </div>

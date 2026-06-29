@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import MobileDashboardLayout from '../../components/MobileDashboardLayout';
 import { useAuth } from '../../context/AuthContext';
+import employeeService from '../../services/employeeService';
+import { parsePolicy } from '../../utils/weekOffPolicy';
 import {
     Clock,
     Calendar,
@@ -111,6 +113,36 @@ const EmployeeDashboard = () => {
         return !attendanceCacheData.myStats[monthKey] || !attendanceCacheData.todayStatus[todayStr];
     });
     const [missedPunchWarning, setMissedPunchWarning] = useState(null);
+    const [shift, setShift] = useState(() => {
+        return attendanceCacheData.shiftPolicy?.shift || null;
+    });
+
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    const formatTime12h = (timeStr) => {
+        if (!timeStr) return '--:--';
+        const parts = timeStr.split(':');
+        if (parts.length < 2) return timeStr;
+        let hour = parseInt(parts[0], 10);
+        const minute = parts[1];
+        const ampm = hour >= 12 ? 'PM' : 'AM';
+        hour = hour % 12;
+        hour = hour ? hour : 12; // the hour '0' should be '12'
+        const strHour = hour < 10 ? '0' + hour : hour;
+        return `${strHour}:${minute} ${ampm}`;
+    };
+
+    const activeWorkingDays = (() => {
+        const policy = shift?.rules?.week_off_policy;
+        if (!policy) return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+        try {
+            const parsed = parsePolicy(policy);
+            return parsed.workingDays || [];
+        } catch (e) {
+            console.error("Failed to parse policy", e);
+            return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+        }
+    })();
 
     useEffect(() => {
         fetchDashboardData();
@@ -118,17 +150,21 @@ const EmployeeDashboard = () => {
 
     const fetchDashboardData = async () => {
         try {
-            const [statsRes, todayRes, holidaysRes, activityRes] = await Promise.all([
+            const [statsRes, todayRes, holidaysRes, activityRes, shiftRes] = await Promise.all([
                 attendanceService.getMyStats(),
                 attendanceService.getTodayStatus(),
                 attendanceService.getUpcomingHolidays(),
-                attendanceService.getRecentActivity()
+                attendanceService.getRecentActivity(),
+                employeeService.getMyShift()
             ]);
 
             if (statsRes.success) setStats(statsRes.data);
             if (todayRes.success) setTodayStatus(todayRes.data);
             if (holidaysRes.success) setUpcomingHolidays(holidaysRes.data);
             if (activityRes.success) setRecentActivity(activityRes.data);
+            if (shiftRes && (shiftRes.ok || shiftRes.success)) {
+                setShift(shiftRes.shift);
+            }
 
             // Fetch recent records to detect missed punches
             const recentRes = await attendanceService.getMyRecords();
@@ -309,6 +345,71 @@ const EmployeeDashboard = () => {
                         >
                             Fix Now
                         </button>
+                    </div>
+                )}
+
+                {/* Shift Details Card */}
+                {shift ? (
+                    <div className="bg-white dark:bg-dark-card rounded-2xl p-5 shadow-sm border border-slate-100 dark:border-github-dark-border animate-fade-in">
+                        <h3 className="text-sm font-bold text-amber-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                            <Calendar size={14} className="text-amber-500" /> Shift Details
+                        </h3>
+                        <div className="space-y-4">
+                            <div>
+                                <span className="block text-[10px] font-bold text-slate-400 dark:text-github-dark-muted uppercase tracking-wider">Shift Name</span>
+                                <span className="text-sm font-bold text-slate-800 dark:text-github-dark-text mt-1 block">{shift.name}</span>
+                            </div>
+                            <div className="h-px bg-slate-100 dark:bg-slate-800"></div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <span className="block text-[10px] font-bold text-slate-400 dark:text-github-dark-muted uppercase tracking-wider">Start Time</span>
+                                    <span className="text-sm font-bold text-slate-800 dark:text-github-dark-text font-mono mt-1 block">{formatTime12h(shift.start_time || shift.rules?.shift_timing?.start_time)}</span>
+                                </div>
+                                <div>
+                                    <span className="block text-[10px] font-bold text-slate-400 dark:text-github-dark-muted uppercase tracking-wider">End Time</span>
+                                    <span className="text-sm font-bold text-slate-800 dark:text-github-dark-text font-mono mt-1 block">{formatTime12h(shift.end_time || shift.rules?.shift_timing?.end_time)}</span>
+                                </div>
+                            </div>
+                            <div className="h-px bg-slate-100 dark:bg-slate-800"></div>
+                            <div>
+                                <span className="block text-[10px] font-bold text-slate-400 dark:text-github-dark-muted uppercase tracking-wider mb-2">Working Days</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {weekdays.map(day => {
+                                        const active = activeWorkingDays.includes(day);
+                                        return (
+                                            <span
+                                                key={day}
+                                                className={`px-2.5 py-1 text-xs font-bold rounded-lg ${
+                                                    active 
+                                                        ? 'bg-indigo-600 text-white dark:bg-indigo-650/40 dark:text-indigo-200' 
+                                                        : 'bg-slate-100 text-slate-400 dark:bg-slate-800/80 dark:text-slate-500'
+                                                }`}
+                                            >
+                                                {day}
+                                            </span>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="bg-white dark:bg-dark-card rounded-2xl p-5 shadow-sm border border-slate-100 dark:border-github-dark-border animate-fade-in">
+                        <h3 className="text-sm font-bold text-indigo-500 uppercase tracking-wider mb-4 flex items-center gap-2">
+                            <Calendar size={14} className="text-indigo-500" /> Shift Details
+                        </h3>
+                        <div className="flex flex-col items-center justify-center text-center py-6">
+                            <div className="relative w-14 h-14 rounded-full border border-slate-200 dark:border-slate-800 flex items-center justify-center mb-3 bg-slate-50/50 dark:bg-slate-800/20">
+                                <Calendar className="text-slate-400 dark:text-slate-500" size={20} />
+                                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-white dark:bg-dark-card border border-slate-200 dark:border-slate-800 flex items-center justify-center shadow-sm">
+                                    <Clock className="text-slate-400 dark:text-slate-500" size={10} />
+                                </div>
+                            </div>
+                            <h4 className="text-sm font-extrabold text-slate-800 dark:text-github-dark-text mb-1">No Shift Assigned</h4>
+                            <p className="text-xs text-slate-500 dark:text-github-dark-muted leading-relaxed max-w-[220px]">
+                                Your shift details will appear here once your administrator assigns a shift.
+                            </p>
+                        </div>
                     </div>
                 )}
 

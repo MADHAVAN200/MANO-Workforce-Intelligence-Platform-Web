@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
+import { leaveService } from '../../services/leaveService';
 import DatePicker from '../../components/DatePicker';
 import { toast } from 'react-toastify';
 import {
@@ -211,14 +211,13 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
         setLoading(true);
         try {
             // Admin: Fetch ALL history to allow filtering
-            const endpoint = isAdmin ? '/leaves/admin/history' : '/leaves/my-history';
-            const res = await api.get(endpoint);
-            if (res.data.ok) {
+            const res = isAdmin ? await leaveService.getAdminLeaves() : await leaveService.getMyLeaves();
+            if (res.ok) {
                 // Admin endpoint returns 'history', User endpoint returns 'leaves'
                 // Pending endpoint (old) returned 'requests'
                 const fetched = isAdmin
-                    ? (res.data.history || res.data.requests || [])
-                    : (res.data.leaves || []);
+                    ? (res.history || res.requests || [])
+                    : (res.leaves || []);
 
                 setLeaves(fetched);
                 if (onLeavesChange) {
@@ -250,11 +249,9 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
                 });
             }
 
-            const res = await api.post('/leaves/request', data, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            });
+            const res = await leaveService.applyForLeave(data);
 
-            if (res.data.ok) {
+            if (res.ok) {
                 toast.success("Leave request submitted successfully");
                 setFormData({ leave_type: 'Casual Leave', start_date: '', end_date: '', reason: '', attachments: [] });
                 setShowForm(false);
@@ -263,7 +260,7 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
             }
         } catch (error) {
             console.error("Apply error", error);
-            toast.error(error.response?.data?.message || "Failed to submit request");
+            toast.error(error.message || "Failed to submit request");
         }
     };
 
@@ -301,15 +298,15 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
             onConfirm: async () => {
                 try {
                     setIsWithdrawing(true);
-                    const res = await api.delete(`/leaves/request/${leaveId}`);
-                    if (res.data.ok) {
+                    const res = await leaveService.withdrawLeave(leaveId);
+                    if (res.ok) {
                         toast.success("Request withdrawn successfully");
                         fetchLeaves();
                         setConfirmModal(prev => ({ ...prev, isOpen: false }));
                     }
                 } catch (error) {
                     console.error("Withdraw error", error);
-                    toast.error(error.response?.data?.message || "Failed to withdraw request");
+                    toast.error(error.message || "Failed to withdraw request");
                 } finally {
                     setIsWithdrawing(false);
                 }
@@ -326,8 +323,8 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
                 admin_comment: adminAction.remarks
             };
 
-            const res = await api.put(`/leaves/admin/status/${selectedLeave.lr_id}`, payload);
-            if (res.data.ok) {
+            const res = await leaveService.updateLeaveStatus(selectedLeave.lr_id, payload);
+            if (res.ok) {
                 toast.success(`Leave request ${actionStatus.toLowerCase()} successfully`);
                 // Update local state
                 const updatedLeaves = leaves.map(l =>
@@ -341,7 +338,7 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
             }
         } catch (error) {
             console.error("Action error", error);
-            toast.error(error.response?.data?.message || "Failed to update status");
+            toast.error(error.message || "Failed to update status");
         }
     };
 
@@ -379,7 +376,7 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
                 <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-14rem)] min-h-[600px]">
 
                     {/* LEFT PANEL: LIST */}
-                    <div className="w-full lg:w-1/3 bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-200 dark:border-github-dark-border overflow-hidden flex flex-col">
+                    <div data-tour-id="leave-admin-list" className="w-full lg:w-1/3 bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-200 dark:border-github-dark-border overflow-hidden flex flex-col">
                         {/* Header & Search */}
                         <div className="p-4 border-b border-slate-200 dark:border-github-dark-border space-y-4">
                             <div className="flex justify-between items-center px-1">
@@ -503,7 +500,7 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
                                 <div className="flex-1 overflow-y-auto p-6 no-scrollbar">
                                     <div className="flex flex-col gap-6 mb-8">
                                         {/* Consolidated Leave Details Card */}
-                                        <div className="bg-slate-50 dark:bg-[#0d1117] p-6 rounded-xl border border-slate-200/80 dark:border-[#30363d] w-full space-y-5 shadow-sm">
+                                        <div data-tour-id="leave-admin-details" className="bg-slate-50 dark:bg-[#0d1117] p-6 rounded-xl border border-slate-200/80 dark:border-[#30363d] w-full space-y-5 shadow-sm">
                                             <div>
                                                 <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-[0.12em] block mb-1">Leave Type</span>
                                                 <span className="font-semibold text-slate-800 dark:text-github-dark-text text-sm">{selectedLeave.leave_type}</span>
@@ -582,43 +579,45 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
                                             )}
 
                                             {/* Action / Remarks Section */}
-                                            {selectedLeave.status === 'pending' ? (
-                                                <div className="border-t border-slate-200/60 dark:border-[#30363d] pt-4">
-                                                    <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-[0.12em] block mb-2">Admin Action</span>
-                                                    <textarea
-                                                        ref={adminRemarksRef}
-                                                        value={adminAction.remarks}
-                                                        onChange={(e) => setAdminAction({ ...adminAction, remarks: e.target.value })}
-                                                        rows="1"
-                                                        placeholder="Add remarks (required for rejection)..."
-                                                        className="w-full p-3 text-sm bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border text-slate-800 dark:text-github-dark-text rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none overflow-hidden min-h-[42px] mb-3"
-                                                    ></textarea>
+                                            <div data-tour-id="leave-admin-actions" className="border-t border-slate-200/60 dark:border-[#30363d] pt-4">
+                                                {selectedLeave.status === 'pending' ? (
+                                                    <>
+                                                        <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-[0.12em] block mb-2">Admin Action</span>
+                                                        <textarea
+                                                            ref={adminRemarksRef}
+                                                            value={adminAction.remarks}
+                                                            onChange={(e) => setAdminAction({ ...adminAction, remarks: e.target.value })}
+                                                            rows="1"
+                                                            placeholder="Add remarks (required for rejection)..."
+                                                            className="w-full p-3 text-sm bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border text-slate-800 dark:text-github-dark-text rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none overflow-hidden min-h-[42px] mb-3"
+                                                        ></textarea>
 
-                                                    <div className="flex gap-3 max-w-xs">
-                                                        <button
-                                                            onClick={() => handleAdminAction('approved')}
-                                                            className="flex-1 py-2 px-4 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 bg-emerald-600 text-white shadow-md hover:bg-emerald-700 cursor-pointer active:scale-95"
-                                                        >
-                                                            <CheckCircle size={14} /> Approve
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleAdminAction('rejected')}
-                                                            className="flex-1 py-2 px-4 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 bg-red-600 text-white shadow-md hover:bg-red-700 cursor-pointer active:scale-95"
-                                                        >
-                                                            <XCircle size={14} /> Reject
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className="border-t border-slate-200/60 dark:border-[#30363d] pt-4">
-                                                    <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-[0.12em] block mb-1">
-                                                        Admin Remarks
-                                                    </span>
-                                                    <p className="text-sm text-slate-700 dark:text-slate-300 font-medium mt-0.5">
-                                                        {selectedLeave.admin_comment || "No remarks provided."}
-                                                    </p>
-                                                </div>
-                                            )}
+                                                        <div className="flex gap-3 max-w-xs">
+                                                            <button
+                                                                onClick={() => handleAdminAction('approved')}
+                                                                className="flex-1 py-2 px-4 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 bg-emerald-600 text-white shadow-md hover:bg-emerald-700 cursor-pointer active:scale-95"
+                                                            >
+                                                                <CheckCircle size={14} /> Approve
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleAdminAction('rejected')}
+                                                                className="flex-1 py-2 px-4 rounded-lg text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 bg-red-600 text-white shadow-md hover:bg-red-700 cursor-pointer active:scale-95"
+                                                            >
+                                                                <XCircle size={14} /> Reject
+                                                            </button>
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span className="text-[10px] font-black text-slate-400 dark:text-github-dark-muted uppercase tracking-[0.12em] block mb-1">
+                                                            Admin Remarks
+                                                        </span>
+                                                        <p className="text-sm text-slate-700 dark:text-slate-300 font-medium mt-0.5">
+                                                            {selectedLeave.admin_comment || "No remarks provided."}
+                                                        </p>
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -653,6 +652,7 @@ const LeaveApplication = ({ onSelectLeave, onLeavesChange, onActiveRangeChange }
                             {/* Apply Button */}
                             <button
                                 onClick={() => setShowForm(true)}
+                                data-tour-id="leave-request-btn"
                                 className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all shadow-md text-xs font-bold active:scale-95 cursor-pointer mr-2"
                             >
                                 <Plus size={14} />

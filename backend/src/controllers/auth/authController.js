@@ -141,7 +141,8 @@ export const onboardOrganization = catchAsync(async (req, res, next) => {
     const {
         org_name, org_code, contact_name, contact_email, contact_phone,
         admin_name, admin_email, admin_phone, admin_password,
-        address, industry, tax_identity, tax_code, max_users
+        gst_number, pan_number, max_users,
+        country, state, city
     } = req.body;
 
     if (!org_name || !org_code) {
@@ -155,6 +156,16 @@ export const onboardOrganization = catchAsync(async (req, res, next) => {
 
     if (!contact_name || !contact_email || !contact_phone) {
         throw new AppError("Primary contact details (name, email, phone) are required.", 400);
+    }
+
+    if (!country || typeof country !== 'string' || country.trim().length !== 2) {
+        throw new AppError("A valid 2-character country code is required.", 400);
+    }
+    if (!state || typeof state !== 'string' || state.trim().length === 0) {
+        throw new AppError("State code is required.", 400);
+    }
+    if (!city || typeof city !== 'string' || city.trim().length === 0) {
+        throw new AppError("City name is required.", 400);
     }
 
     const finalAdminEmail = admin_email || contact_email;
@@ -177,17 +188,16 @@ export const onboardOrganization = catchAsync(async (req, res, next) => {
         throw new AppError("Administrator email is already registered.", 400);
     }
 
+    const finalPhone = admin_phone || contact_phone;
+    if (finalPhone) {
+        const existingPhone = await attendanceDB('users').where('phone_no', finalPhone.trim()).first();
+        if (existingPhone) {
+            throw new AppError("Administrator phone number is already registered.", 400);
+        }
+    }
+
     const subscription_expiry = new Date();
     subscription_expiry.setDate(subscription_expiry.getDate() + 30); // 30-day trial
-
-    const notesObj = {
-        address: address || null,
-        industry: industry || null,
-        tax_identity: tax_identity || null,
-        tax_code: tax_code || null,
-        onboarded_via: 'showcase_self_onboarding',
-        onboarded_at: new Date().toISOString()
-    };
 
     const insertedId = await attendanceDB.transaction(async (trx) => {
         const [orgId] = await trx('organizations').insert({
@@ -199,10 +209,14 @@ export const onboardOrganization = catchAsync(async (req, res, next) => {
             subscription_plan: 'Trial',
             subscription_expiry,
             is_trial: 1,
-            status: 'active',
+            status: 'pending_approval',
             max_users: max_users || 50,
             last_user_number: 1,
-            notes: JSON.stringify(notesObj)
+            gst_number: gst_number || null,
+            pan_number: pan_number || null,
+            country: country || null,
+            state: state || null,
+            city: city || null
         });
 
         const hashedPassword = await bcrypt.hash(finalAdminPassword, 10);
@@ -229,5 +243,21 @@ export const onboardOrganization = catchAsync(async (req, res, next) => {
         org_id: insertedId,
         user_code: `${cleanOrgCode}001`,
         email: finalAdminEmail.trim().toLowerCase()
+    });
+});
+
+export const changePassword = catchAsync(async (req, res, next) => {
+    const { newPassword } = req.body;
+    const userId = req.user.user_id || req.user.id;
+
+    if (!newPassword) {
+        throw new AppError("New password is required", 400);
+    }
+
+    await authService.changePassword(userId, newPassword);
+
+    res.status(200).json({
+        success: true,
+        message: "Password changed successfully."
     });
 });

@@ -6,6 +6,8 @@ import api from '../../services/api';
 import { toast } from 'react-toastify';
 import LoadingScreen from '../../components/LoadingScreen';
 import MinimalSelect from '../../components/MinimalSelect';
+import PhoneInput from '../../components/PhoneInput';
+import { validatePhone, validateEmail } from '../../utils/validation';
 
 const OrganizationList = () => {
     const [organizations, setOrganizations] = useState([]);
@@ -38,13 +40,53 @@ const OrganizationList = () => {
     const [formData, setFormData] = useState({
         org_name: '', org_code: '', status: 'active', subscription_plan: 'Trial', subscription_expiry: '', grace_period_days: 0, max_users: 50,
         contact_name: '', contact_email: '', contact_phone: '',
-        admin_name: '', admin_email: '', admin_phone: '', admin_password: ''
+        admin_name: '', admin_email: '', admin_phone: '', admin_password: '',
+        gst_number: '', pan_number: ''
     });
     const [formLoading, setFormLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [deleteConfirmOrg, setDeleteConfirmOrg] = useState(null); // org object to confirm deletion
     const [deleteLoading, setDeleteLoading] = useState(false);
     const [listTab, setListTab] = useState('active'); // 'active' | 'deleted'
+    const [isOrgCodeManuallyEdited, setIsOrgCodeManuallyEdited] = useState(false);
+
+    // Auto-generate organization code based on organization name (only when creating new)
+    useEffect(() => {
+        if (!selectedOrg && isEditing && !isOrgCodeManuallyEdited && formData.org_name) {
+            const name = formData.org_name;
+            const words = name.trim().split(/[\s\-_]+/).map(w => w.replace(/[^a-zA-Z0-9]/g, "")).filter(Boolean);
+            let code = "";
+            if (words.length >= 3) {
+                code = words.map(w => w[0]).join("");
+            } else if (words.length === 2) {
+                const firstWord = words[0];
+                const secondWord = words[1];
+                if (firstWord.length >= 2) {
+                    code = firstWord.substring(0, 2) + secondWord.charAt(0);
+                } else {
+                    code = firstWord.charAt(0) + secondWord.substring(0, 2);
+                }
+            } else if (words.length === 1) {
+                code = words[0];
+            }
+
+            let cleanCode = code.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+            if (cleanCode.length > 10) {
+                cleanCode = cleanCode.substring(0, 10);
+            }
+            if (cleanCode.length < 3 && cleanCode.length > 0) {
+                const originalClean = name.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+                if (originalClean.length >= 3) {
+                    cleanCode = originalClean.substring(0, 5);
+                } else {
+                    cleanCode = (cleanCode + "ORG").substring(0, 5);
+                }
+            }
+            if (cleanCode) {
+                setFormData(prev => ({ ...prev, org_code: cleanCode }));
+            }
+        }
+    }, [formData.org_name, isOrgCodeManuallyEdited, selectedOrg, isEditing]);
 
     useEffect(() => {
         fetchOrganizations();
@@ -74,6 +116,8 @@ const OrganizationList = () => {
         setSelectedOrg(org);
         setFormData({
             ...org,
+            gst_number: org.gst_number || '',
+            pan_number: org.pan_number || '',
             subscription_expiry: org.subscription_expiry ? new Date(org.subscription_expiry).toISOString().split('T')[0] : ''
         });
         setIsEditing(false); // Mode: View existing
@@ -159,6 +203,14 @@ const OrganizationList = () => {
     };
 
     const handleSaveAdmin = async (adminId) => {
+        if (!validateEmail(adminFormData.email)) {
+            toast.error("Please enter a valid email address.");
+            return;
+        }
+        if (adminFormData.phone_no && !validatePhone(adminFormData.phone_no)) {
+            toast.error("Please enter a valid phone number according to the country code.");
+            return;
+        }
         try {
             await api.put(`/organizations/${selectedOrg.org_id}/admins/${adminId}`, adminFormData);
             toast.success("Admin updated successfully");
@@ -173,29 +225,91 @@ const OrganizationList = () => {
         setFormData({
             org_name: '', org_code: '', status: 'active', subscription_plan: 'Trial', subscription_expiry: '', grace_period_days: 0, max_users: 50,
             contact_name: '', contact_email: '', contact_phone: '',
-            admin_name: '', admin_email: '', admin_phone: '', admin_password: ''
+            admin_name: '', admin_email: '', admin_phone: '', admin_password: '',
+            gst_number: '', pan_number: ''
         });
+        setIsOrgCodeManuallyEdited(false);
         setIsEditing(true); // Mode: Create new
     };
 
     const handleSave = async (e) => {
         e.preventDefault();
+        
+        // Validate organization code
+        const cleanCode = formData.org_code.trim().toUpperCase();
+        if (cleanCode.length < 3 || cleanCode.length > 10 || !/^[A-Z0-9]+$/.test(cleanCode)) {
+            toast.error("Organization code must be 3-10 alphanumeric characters with no spaces.");
+            return;
+        }
+        
+        // Validate contact details
+        if (!validateEmail(formData.contact_email)) {
+            toast.error("Please enter a valid contact email address.");
+            return;
+        }
+        if (!validatePhone(formData.contact_phone)) {
+            toast.error("Please enter a valid contact phone number according to the country code.");
+            return;
+        }
+        
+        // Admin details validation (only for new organization creation)
+        if (!selectedOrg) {
+            if (!validateEmail(formData.admin_email)) {
+                toast.error("Please enter a valid admin email address.");
+                return;
+            }
+            if (formData.admin_phone && !validatePhone(formData.admin_phone)) {
+                toast.error("Please enter a valid admin phone number according to the country code.");
+                return;
+            }
+        }
+
+        // GST & PAN validation
+        const gst = (formData.gst_number || '').trim().toUpperCase();
+        const pan = (formData.pan_number || '').trim().toUpperCase();
+
+        if ((gst && !pan) || (!gst && pan)) {
+            toast.error("Please enter both GST and PAN, or leave both fields blank.");
+            return;
+        }
+
+        if (gst && pan) {
+            const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+            const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+
+            if (!gstRegex.test(gst)) {
+                toast.error("Please enter a valid GST number.");
+                return;
+            }
+            if (!panRegex.test(pan)) {
+                toast.error("Please enter a valid PAN number.");
+                return;
+            }
+        }
+
+        const payload = {
+            ...formData,
+            org_code: cleanCode,
+            gst_number: gst || null,
+            pan_number: pan || null
+        };
+
         setFormLoading(true);
         try {
             if (!selectedOrg) {
                 // Create
-                const res = await api.post('/organizations', formData);
+                const res = await api.post('/organizations', payload);
                 toast.success('Organization created successfully');
                 await fetchOrganizations();
                 // Select the newly created one (assuming backend returns org_id, but fetch gets the list anyway)
                 setIsEditing(false);
             } else {
                 // Update
-                await api.put(`/organizations/${selectedOrg.org_id}`, formData);
+                await api.put(`/organizations/${selectedOrg.org_id}`, payload);
                 toast.success('Organization updated successfully');
 
                 // Update local state to avoid full refetch if you want, but fetch is safer
-                const updatedOrg = { ...selectedOrg, ...formData };
+                const updatedOrg = { ...selectedOrg, ...payload };
                 setOrganizations(organizations.map(o => o.org_id === updatedOrg.org_id ? updatedOrg : o));
                 setSelectedOrg(updatedOrg);
                 setIsEditing(false);
@@ -232,6 +346,35 @@ const OrganizationList = () => {
             setFormData(updatedOrg);
         } catch (error) {
             toast.error(error.response?.data?.message || 'Reactivation failed');
+        }
+    };
+
+    const handleApprove = async () => {
+        if (!selectedOrg) return;
+        try {
+            await api.put(`/organizations/${selectedOrg.org_id}`, { status: 'active' });
+            toast.success('Organization approved successfully');
+            await fetchOrganizations();
+            const updatedOrg = { ...selectedOrg, status: 'active' };
+            setSelectedOrg(updatedOrg);
+            setFormData(updatedOrg);
+        } catch (error) {
+            toast.error(error.response?.data?.message || 'Approval failed');
+        }
+    };
+
+    const handleReject = async () => {
+        if (!selectedOrg) return;
+        if (window.confirm("Are you sure you want to reject and delete this organization?")) {
+            try {
+                const res = await api.delete(`/organizations/${selectedOrg.org_id}`);
+                toast.success(res.data.message || 'Organization rejected successfully');
+                setSelectedOrg(null);
+                setIsEditing(false);
+                await fetchOrganizations();
+            } catch (error) {
+                toast.error(error.response?.data?.message || 'Rejection failed');
+            }
         }
     };
 
@@ -275,14 +418,16 @@ const OrganizationList = () => {
         o.org_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         o.org_code.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const activeOrgs  = organizations.filter(o => !isPendingDeletion(o) && matchesSearch(o));
+    const activeOrgs  = organizations.filter(o => o.status !== 'pending_approval' && !isPendingDeletion(o) && matchesSearch(o));
+    const approvalOrgs = organizations.filter(o => o.status === 'pending_approval' && !isPendingDeletion(o) && matchesSearch(o));
     const pendingOrgs = organizations.filter(o =>  isPendingDeletion(o) && matchesSearch(o));
-    const displayedOrgs = listTab === 'active' ? activeOrgs : pendingOrgs;
+    const displayedOrgs = listTab === 'active' ? activeOrgs : listTab === 'approval' ? approvalOrgs : pendingOrgs;
 
     const renderHubDashboard = () => {
         // Dynamic aggregations
         const totalOrgs = organizations.length;
         const activeOrgsCount = organizations.filter(o => o.status === 'active' && !isPendingDeletion(o)).length;
+        const pendingApprovalOrgsCount = organizations.filter(o => o.status === 'pending_approval' && !isPendingDeletion(o)).length;
         const suspendedOrgsCount = organizations.filter(o => o.status === 'suspended' && !isPendingDeletion(o)).length;
         const pendingDeletionOrgsCount = organizations.filter(o => isPendingDeletion(o)).length;
         
@@ -300,6 +445,7 @@ const OrganizationList = () => {
         // Status grouping
         const statusDistribution = [
             { name: 'Active', value: activeOrgsCount, color: '#10b981' },
+            { name: 'Pending Approval', value: pendingApprovalOrgsCount, color: '#8b5cf6' },
             { name: 'Suspended', value: suspendedOrgsCount, color: '#f59e0b' },
             { name: 'Pending Deletion', value: pendingDeletionOrgsCount, color: '#ef4444' }
         ].filter(item => item.value > 0);
@@ -320,7 +466,7 @@ const OrganizationList = () => {
                 </div>
 
                 {/* KPI Cards Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 shrink-0">
                      {/* Total Organizations */}
                      <div className="bg-white dark:bg-dark-card p-5 rounded-2xl border border-slate-200 dark:border-github-dark-border shadow-sm flex items-center justify-between">
                          <div>
@@ -457,7 +603,9 @@ const OrganizationList = () => {
                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
                                         selectedOrg.status === 'active' 
                                             ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' 
-                                            : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                            : selectedOrg.status === 'pending_approval'
+                                                ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
+                                                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                                     }`}>
                                         {selectedOrg.status}
                                     </span>
@@ -880,14 +1028,14 @@ const OrganizationList = () => {
                                 <button
                                     type="button"
                                     onClick={() => { setListTab('active'); setSelectedOrg(null); setIsEditing(false); }}
-                                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${
+                                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 ${
                                         listTab === 'active'
                                             ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
                                             : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'
                                     }`}
                                 >
                                     <span>Active</span>
-                                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
                                         listTab === 'active'
                                             ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300'
                                             : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
@@ -895,15 +1043,31 @@ const OrganizationList = () => {
                                 </button>
                                 <button
                                     type="button"
+                                    onClick={() => { setListTab('approval'); setSelectedOrg(null); setIsEditing(false); }}
+                                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 ${
+                                        listTab === 'approval'
+                                            ? 'bg-white dark:bg-slate-700 text-violet-600 dark:text-violet-400 shadow-sm'
+                                            : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'
+                                    }`}
+                                >
+                                    <span>Approval</span>
+                                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
+                                        listTab === 'approval'
+                                            ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/60 dark:text-violet-300'
+                                            : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                    }`}>{approvalOrgs.length}</span>
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => { setListTab('deleted'); setSelectedOrg(null); setIsEditing(false); }}
-                                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200 ${
+                                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 ${
                                         listTab === 'deleted'
                                             ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-sm'
                                             : 'text-slate-500 dark:text-github-dark-muted hover:text-slate-700 dark:hover:text-slate-200'
                                     }`}
                                 >
                                     <span>Deleted</span>
-                                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
                                         listTab === 'deleted'
                                             ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300'
                                             : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
@@ -920,35 +1084,50 @@ const OrganizationList = () => {
                                 <div className="flex flex-col items-center justify-center p-8 text-slate-400 dark:text-github-dark-muted gap-2">
                                     {listTab === 'deleted'
                                         ? <><AlertTriangle size={28} className="text-amber-300" /><span className="text-sm">No deleted organizations.</span></>
-                                        : <><Building size={28} className="text-slate-300" /><span className="text-sm">No organizations found.</span></>
+                                        : listTab === 'approval'
+                                            ? <><Shield size={28} className="text-violet-400" /><span className="text-sm">No organizations pending approval.</span></>
+                                            : <><Building size={28} className="text-slate-300" /><span className="text-sm">No organizations found.</span></>
                                     }
                                 </div>
-                            ) : listTab === 'active' ? (
-                                displayedOrgs.map((org) => (
-                                    <div
-                                        key={org.org_id}
-                                        onClick={() => handleSelectOrg(org)}
-                                        className={`p-4 rounded-xl cursor-pointer transition-all duration-200 border ${selectedOrg?.org_id === org.org_id
-                                                ? 'bg-indigo-50 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-500/30'
-                                                : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                                            }`}
-                                    >
-                                        <div className="flex justify-between items-start mb-1">
-                                            <h3 className={`font-semibold text-sm ${selectedOrg?.org_id === org.org_id ? 'text-indigo-900 dark:text-indigo-300' : 'text-slate-800 dark:text-github-dark-text'}`}>
-                                                {org.org_name}
-                                            </h3>
-                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${org.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                                                    'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                                                }`}>
-                                                {org.status}
-                                            </span>
+                            ) : listTab === 'active' || listTab === 'approval' ? (
+                                displayedOrgs.map((org) => {
+                                    const isPendingApproval = org.status === 'pending_approval';
+                                    return (
+                                        <div
+                                            key={org.org_id}
+                                            onClick={() => handleSelectOrg(org)}
+                                            className={`p-4 rounded-xl cursor-pointer transition-all duration-200 border ${selectedOrg?.org_id === org.org_id
+                                                    ? isPendingApproval
+                                                        ? 'bg-violet-50 border-violet-200 dark:bg-violet-900/20 dark:border-violet-500/30'
+                                                        : 'bg-indigo-50 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-500/30'
+                                                    : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                                                }`}
+                                        >
+                                            <div className="flex justify-between items-start mb-1">
+                                                <h3 className={`font-semibold text-sm ${selectedOrg?.org_id === org.org_id 
+                                                    ? isPendingApproval 
+                                                        ? 'text-violet-900 dark:text-violet-300' 
+                                                        : 'text-indigo-900 dark:text-indigo-300' 
+                                                    : 'text-slate-800 dark:text-github-dark-text'}`}>
+                                                    {org.org_name}
+                                                </h3>
+                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                                    org.status === 'active' 
+                                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' 
+                                                        : org.status === 'pending_approval'
+                                                            ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
+                                                            : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                                    }`}>
+                                                    {org.status}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between items-center text-xs text-slate-500 dark:text-github-dark-muted">
+                                                <span>Code: <span className="font-mono">{org.org_code}</span></span>
+                                                <span className="flex items-center gap-1"><Shield size={12} /> {org.subscription_plan}</span>
+                                            </div>
                                         </div>
-                                        <div className="flex justify-between items-center text-xs text-slate-500 dark:text-github-dark-muted">
-                                            <span>Code: <span className="font-mono">{org.org_code}</span></span>
-                                            <span className="flex items-center gap-1"><Shield size={12} /> {org.subscription_plan}</span>
-                                        </div>
-                                    </div>
-                                ))
+                                    );
+                                })
                             ) : (
                                 displayedOrgs.map((org) => (
                                     <div
@@ -1047,7 +1226,25 @@ const OrganizationList = () => {
                                                 <RotateCcw size={14} /> Recover Organization
                                             </button>
                                         )}
-                                        {!isEditing && selectedOrg && selectedOrg.status !== 'suspended' && selectedOrg.status !== 'pending_deletion' && (
+                                        {!isEditing && selectedOrg && selectedOrg.status === 'pending_approval' && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleApprove}
+                                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold transition-all duration-200 flex items-center gap-2 text-sm ml-2 shadow-sm active:scale-[0.98]"
+                                                >
+                                                    Approve
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleReject}
+                                                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition-all duration-200 flex items-center gap-2 text-sm ml-2 shadow-sm active:scale-[0.98]"
+                                                >
+                                                    Reject
+                                                </button>
+                                            </>
+                                        )}
+                                        {!isEditing && selectedOrg && selectedOrg.status !== 'suspended' && selectedOrg.status !== 'pending_deletion' && selectedOrg.status !== 'pending_approval' && (
                                             <button
                                                 type="button"
                                                 onClick={handleDeactivate}
@@ -1065,7 +1262,7 @@ const OrganizationList = () => {
                                                 Reactivate
                                             </button>
                                         )}
-                                        {!isEditing && selectedOrg && selectedOrg.status !== 'pending_deletion' && (
+                                        {!isEditing && selectedOrg && selectedOrg.status !== 'pending_deletion' && selectedOrg.status !== 'pending_approval' && (
                                             <button
                                                 type="button"
                                                 onClick={() => setDeleteConfirmOrg(selectedOrg)}
@@ -1119,7 +1316,7 @@ const OrganizationList = () => {
                                                     <div className="space-y-1.5">
                                                         <label className="text-xs font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider">Organization Code</label>
                                                         {isEditing ? (
-                                                            <input required disabled={!!selectedOrg} value={formData.org_code} onChange={(e) => setFormData({ ...formData, org_code: e.target.value.toUpperCase() })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-github-dark-border rounded-lg dark:bg-github-dark-subtle text-slate-900 dark:text-github-dark-text focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-900 font-mono text-sm" placeholder="e.g. ACM01" />
+                                                            <input required value={formData.org_code} onChange={(e) => { setIsOrgCodeManuallyEdited(true); setFormData({ ...formData, org_code: e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase() }); }} className="w-full px-4 py-2.5 border border-slate-300 dark:border-github-dark-border rounded-lg dark:bg-github-dark-subtle text-slate-900 dark:text-github-dark-text focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors disabled:opacity-60 disabled:bg-slate-100 dark:disabled:bg-slate-900 font-mono text-sm" placeholder="e.g. ACM01" />
                                                         ) : (
                                                             <div className="px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-100 dark:border-github-dark-border/50 rounded-lg text-slate-800 dark:text-github-dark-text font-mono text-sm shadow-sm">{selectedOrg.org_code}</div>
                                                         )}
@@ -1146,9 +1343,41 @@ const OrganizationList = () => {
                                                     <div className="space-y-1.5">
                                                         <label className="text-xs font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider">Contact Phone Number</label>
                                                         {isEditing ? (
-                                                            <input type="tel" value={formData.contact_phone} onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-github-dark-border rounded-lg dark:bg-github-dark-subtle text-slate-900 dark:text-github-dark-text focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm" placeholder="+1 234 567 8900" />
+                                                            <PhoneInput
+                                                                value={formData.contact_phone}
+                                                                onChange={(val) => setFormData({ ...formData, contact_phone: val })}
+                                                                variant="admin-desktop"
+                                                            />
                                                         ) : (
                                                             <div className="px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-100 dark:border-github-dark-border/50 rounded-lg text-slate-800 dark:text-github-dark-text font-mono text-sm shadow-sm">{selectedOrg.contact_phone || 'N/A'}</div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-xs font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider">GST Number</label>
+                                                        {isEditing ? (
+                                                            <input 
+                                                                value={formData.gst_number || ''} 
+                                                                onChange={(e) => setFormData({ ...formData, gst_number: e.target.value })} 
+                                                                className="w-full px-4 py-2.5 border border-slate-300 dark:border-github-dark-border rounded-lg dark:bg-github-dark-subtle text-slate-900 dark:text-github-dark-text focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm font-mono uppercase" 
+                                                                placeholder="e.g. 22AAAAA0000A1Z5" 
+                                                            />
+                                                        ) : (
+                                                            <div className="px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-100 dark:border-github-dark-border/50 rounded-lg text-slate-800 dark:text-github-dark-text font-mono text-sm shadow-sm">{selectedOrg.gst_number || 'N/A'}</div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-xs font-bold text-slate-500 dark:text-github-dark-muted uppercase tracking-wider">PAN Number</label>
+                                                        {isEditing ? (
+                                                            <input 
+                                                                value={formData.pan_number || ''} 
+                                                                onChange={(e) => setFormData({ ...formData, pan_number: e.target.value })} 
+                                                                className="w-full px-4 py-2.5 border border-slate-300 dark:border-github-dark-border rounded-lg dark:bg-github-dark-subtle text-slate-900 dark:text-github-dark-text focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm font-mono uppercase" 
+                                                                placeholder="e.g. ABCDE1234F" 
+                                                            />
+                                                        ) : (
+                                                            <div className="px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-100 dark:border-github-dark-border/50 rounded-lg text-slate-800 dark:text-github-dark-text font-mono text-sm shadow-sm">{selectedOrg.pan_number || 'N/A'}</div>
                                                         )}
                                                     </div>
                                                 </div>
@@ -1273,7 +1502,12 @@ const OrganizationList = () => {
 
                                                         <div className="space-y-1.5">
                                                             <label className="text-xs font-bold text-indigo-900/80 dark:text-indigo-400 uppercase tracking-wider">Admin Phone Number</label>
-                                                            <input type="tel" value={formData.admin_phone} onChange={(e) => setFormData({ ...formData, admin_phone: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-github-dark-border rounded-lg dark:bg-github-dark-subtle text-slate-900 dark:text-github-dark-text focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm" placeholder="+1 234 567 8900" />
+                                                            <PhoneInput
+                                                                value={formData.admin_phone}
+                                                                onChange={(val) => setFormData({ ...formData, admin_phone: val })}
+                                                                variant="admin-desktop"
+                                                                placeholder="Admin Phone"
+                                                            />
                                                         </div>
 
                                                         <div className="space-y-1.5 sm:col-span-2">

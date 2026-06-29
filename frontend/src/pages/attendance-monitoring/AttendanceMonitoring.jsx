@@ -60,11 +60,48 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
     AreaChart, Area
 } from 'recharts';
+import { useTour } from '../../context/TourContext';
+
 
 
 // --- MAP HELPER COMPONENTS ---
 const MapRecenter = ({ data, searchTerm, departmentFilter }) => {
     const map = useMap();
+
+    // Dynamically calculate and enforce minZoom to fit the panel width
+    useEffect(() => {
+        const updateMinZoom = () => {
+            const container = map.getContainer();
+            if (container) {
+                const containerWidth = container.clientWidth;
+                if (containerWidth) {
+                    // Min zoom is calculated so that the map width (256 * 2^zoom) is >= container width
+                    const calculatedMinZoom = Math.max(3, Math.ceil(Math.log2(containerWidth / 256)));
+                    map.setMinZoom(calculatedMinZoom);
+                    
+                    if (map.getZoom() < calculatedMinZoom) {
+                        map.setZoom(calculatedMinZoom);
+                    }
+                }
+            }
+        };
+
+        updateMinZoom();
+
+        const resizeObserver = new ResizeObserver(() => {
+            updateMinZoom();
+        });
+        
+        const container = map.getContainer();
+        if (container) {
+            resizeObserver.observe(container);
+        }
+
+        return () => {
+            resizeObserver.disconnect();
+        };
+    }, [map]);
+
     useEffect(() => {
         if (!data || data.length === 0) return;
 
@@ -80,7 +117,8 @@ const MapRecenter = ({ data, searchTerm, departmentFilter }) => {
         if (points.length > 0) {
             map.fitBounds(points, { padding: [50, 50], maxZoom: 15 });
         }
-    }, [searchTerm, departmentFilter, data.length > 0, map]);
+    }, [searchTerm, departmentFilter, data, map]);
+
     return null;
 };
 
@@ -373,47 +411,28 @@ const MapSidebarContent = ({ selectedCluster, onClose }) => {
 
 // Timezone-aware date/time parser and normalizer
 const parseTimeInTimezone = (r, isOut, orgTimezone) => {
-    let utcStr = null;
     let fallbackStr = isOut ? r.time_out : r.time_in;
+    if (!fallbackStr) return null;
     
-    if (r.metadata) {
-        try {
-            const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata;
-            utcStr = isOut ? meta?.time_out?.timestamp_utc : meta?.time_in?.timestamp_utc;
-        } catch (e) {
-            console.error("Failed to parse metadata", e);
-        }
+    if (fallbackStr instanceof Date) {
+        return fallbackStr;
     }
     
-    // If we have a valid UTC string from metadata, we convert it to the organization's timezone.
-    if (utcStr) {
-        try {
-            const d = new Date(utcStr);
-            if (!isNaN(d.getTime())) {
-                const localStr = d.toLocaleString('en-US', { timeZone: orgTimezone || 'UTC' });
-                const parsed = new Date(localStr);
-                if (!isNaN(parsed.getTime())) return parsed;
-            }
-        } catch (err) {
-            console.error("Error parsing UTC timestamp:", err);
+    try {
+        const parts = String(fallbackStr).split(/[- :T.]/);
+        if (parts.length >= 3) {
+            const year = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1;
+            const day = parseInt(parts[2], 10);
+            const hour = parts[3] ? parseInt(parts[3], 10) : 0;
+            const minute = parts[4] ? parseInt(parts[4], 10) : 0;
+            const second = parts[5] ? parseInt(parts[5], 10) : 0;
+            const parsed = new Date(year, month, day, hour, minute, second);
+            if (!isNaN(parsed.getTime())) return parsed;
         }
+    } catch (err) {
+        console.error("Error parsing timestamp:", err);
     }
-    
-    // Otherwise, fallback to database time_in/time_out.
-    if (fallbackStr) {
-        try {
-            const d = new Date(fallbackStr);
-            if (!isNaN(d.getTime())) {
-                // If it represents local clock time stored as UTC, we treat fallbackStr as UTC to preserve it
-                const localStr = d.toLocaleString('en-US', { timeZone: 'UTC' });
-                const parsed = new Date(localStr);
-                if (!isNaN(parsed.getTime())) return parsed;
-            }
-        } catch (err) {
-            console.error("Error parsing fallback timestamp:", err);
-        }
-    }
-    
     return null;
 };
 
@@ -566,8 +585,12 @@ const processAttendanceData = (staff, resolvedTz) => {
     return mergedData;
 };
 
+const PAGE_KEY = 'admin_attendance_monitoring';
+
 const AttendanceMonitoring = () => {
     const navigate = useNavigate();
+    const { avatarTimestamp } = useAuth();
+    const { startTour, hasSeenPage, wasSkippedThisSession, tourEnabled } = useTour();
 
     // Get initial values from localStorage to support persistent views/filters
     const initialView = localStorage.getItem('live_attendance_active_view') || 'cards';
@@ -581,11 +604,53 @@ const AttendanceMonitoring = () => {
 
     const [orgTimezone, setOrgTimezone] = useState(() => cachedResponse?.timezone || 'UTC');
 
-    const { avatarTimestamp } = useAuth();
     const [activeTab, setActiveTab] = useState(() => {
         const params = new URLSearchParams(window.location.search);
         return params.get('tab') || 'live';
     });
+
+    const tourSteps = React.useMemo(() => [
+        {
+            targetId: 'attendance-tabs',
+            title: 'Attendance Modules',
+            description: 'Switch between the Live Attendance dashboard and the Correction Requests queue.',
+            action: () => {
+                setActiveTab('live');
+            }
+        },
+        {
+            targetId: 'attendance-live-stats',
+            title: 'Live Metrics & Filters',
+            description: 'Track real-time employee counts for different attendance states. Click any metric card to filter the employee list below to only those matching that state.',
+            action: () => {
+                setActiveTab('live');
+            }
+        },
+        {
+            targetId: 'attendance-controls',
+            title: 'Data Controls & Views',
+            description: 'Search for specific employees, filter by department, select dates, or switch between Overview cards, Analytics charts, and high-density Timeline views.',
+            action: () => {
+                setActiveTab('live');
+            }
+        },
+        {
+            targetId: 'attendance-employee-card',
+            title: 'Employee Card & Status Badges',
+            description: 'Each card displays an employee\'s active session details. The color-coded status badges indicate their shift status: "Present" (on-time check-in), "Late" (checked in past the grace period), "Absent" (no check-in yet), "On Leave" (approved time off), and a pulsing "Active" badge showing they are currently logged in.',
+            action: () => {
+                setActiveTab('live');
+            }
+        },
+        {
+            targetId: 'attendance-requests-queue',
+            title: 'Correction Requests Queue',
+            description: 'This is the Correction Requests queue. As an administrator, you can review, approve, or reject attendance adjustment requests submitted by employees. You can view the request details, employee comments, and adjust or confirm their sessions directly from this interface.',
+            action: () => {
+                setActiveTab('requests');
+            }
+        }
+    ], [setActiveTab]);
     const [activeView, setActiveView] = useState(initialView); // 'cards' | 'graph' | 'table' | 'map'
     const [activeTheme, setActiveTheme] = useState('voyager');
     const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
@@ -686,18 +751,50 @@ const AttendanceMonitoring = () => {
     const [searchTerm, setSearchTerm] = useState(initialSearch);
     const [departmentFilter, setDepartmentFilter] = useState(initialDept);
     const [statusFilter, setStatusFilter] = useState(initialStatus);
+    const [desgFilter, setDesgFilter] = useState('All');
     const [isDeptDropdownOpen, setIsDeptDropdownOpen] = useState(false);
+    const [isDesgDropdownOpen, setIsDesgDropdownOpen] = useState(false);
     const [selectedDate, setSelectedDate] = React.useState(initialDate);
     const [lastSynced, setLastSynced] = React.useState(new Date());
 
+    const [departments, setDepartments] = useState([]);
+    const [designations, setDesignations] = useState([]);
+
+    useEffect(() => {
+        const fetchDepts = async () => {
+            try {
+                const deptRes = await adminService.getDepartments();
+                if (deptRes && deptRes.departments) {
+                    const sortedDepts = [...deptRes.departments].sort((a, b) => a.dept_name.localeCompare(b.dept_name));
+                    setDepartments(sortedDepts);
+                }
+            } catch (err) {
+                console.error("Failed to load departments", err);
+            }
+        };
+        const fetchDesgs = async () => {
+            try {
+                const desgRes = await adminService.getDesignations();
+                if (desgRes && desgRes.designations) {
+                    const sortedDesgs = [...desgRes.designations].sort((a, b) => a.desg_name.localeCompare(b.desg_name));
+                    setDesignations(sortedDesgs);
+                }
+            } catch (err) {
+                console.error("Failed to load designations", err);
+            }
+        };
+        fetchDepts();
+        fetchDesgs();
+    }, []);
+
     const DEPARTMENTS = [
         { value: 'All', label: 'All Departments' },
-        { value: 'Sales', label: 'Sales' },
-        { value: 'Retail', label: 'Retail' },
-        { value: 'Logistics', label: 'Logistics' },
-        { value: 'Operations', label: 'Operations' },
-        { value: 'IT', label: 'IT' },
-        { value: 'HR', label: 'HR' }
+        ...departments.map(d => ({ value: d.dept_name, label: d.dept_name }))
+    ];
+
+    const DESIGNATIONS = [
+        { value: 'All', label: 'All Designations' },
+        ...designations.map(d => ({ value: d.desg_name, label: d.desg_name }))
     ];
 
     // Sync filter states to localStorage
@@ -788,6 +885,14 @@ const AttendanceMonitoring = () => {
         }
     }, [activeTab, selectedDate]);
 
+    useEffect(() => {
+        if (activeTab === 'requests') {
+            fetchCorrectionRequests();
+        }
+    }, [activeTab]);
+
+
+
     const fetchCorrectionRequests = async () => {
         setRequestsLoading(true);
         try {
@@ -845,8 +950,43 @@ const AttendanceMonitoring = () => {
         }
     };
 
+    const handleUpdateStatus = async (acr_id, status) => {
+        try {
+            const overrides = {};
+            if (status === 'approved' && overrideMode) {
+                const valid = overrideSessions.filter(s => s.time_in && s.time_out);
+                if (valid.length === 0) {
+                    toast.error("At least one valid session required for manual correction");
+                    return;
+                }
+                overrides.sessions = valid;
+            }
 
+            await attendanceService.updateCorrectionStatus(acr_id, status, reviewComment, overrides);
+            toast.success(`Request ${status} successfully`);
+            fetchCorrectionRequests();
+            fetchData(true, true); // Refetch live dashboard data silently
+            if (selectedRequestData && selectedRequestData.acr_id === acr_id) {
+                fetchRequestDetail(acr_id);
+            }
+        } catch (error) {
+            toast.error(error.message);
+        }
+    };
 
+    const handleAcknowledgeRequest = async (acrId, status, rejectReason = '') => {
+        try {
+            await attendanceService.updateCorrectionStatus(acrId, status, rejectReason);
+            toast.success(`Request ${status} successfully`);
+            fetchCorrectionRequests();
+            fetchData(true, true); // Refetch live dashboard data silently
+            if (selectedRequestData && selectedRequestData.acr_id === acrId) {
+                fetchRequestDetail(acrId);
+            }
+        } catch (error) {
+            toast.error(error.message);
+        }
+    };
 
     // Stats Cards Data
     const statCards = [
@@ -861,6 +1001,7 @@ const AttendanceMonitoring = () => {
     const filteredData = attendanceData.filter(item => {
         const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesDept = departmentFilter === 'All' || item.department === departmentFilter;
+        const matchesDesg = desgFilter === 'All' || item.role === desgFilter;
         
         let matchesStatus = true;
         if (statusFilter === 'present') {
@@ -873,7 +1014,7 @@ const AttendanceMonitoring = () => {
             matchesStatus = item.allStatuses ? item.allStatuses.includes('Active') : item.status.includes('Active');
         }
         
-        return matchesSearch && matchesDept && matchesStatus;
+        return matchesSearch && matchesDept && matchesDesg && matchesStatus;
     });
 
     const getStatusStyle = (status) => {
@@ -937,31 +1078,6 @@ const AttendanceMonitoring = () => {
     const filteredRequests = correctionRequests.filter(req =>
         req.user_name?.toLowerCase().includes(correctionSearchTerm.toLowerCase())
     );
-
-    const handleUpdateStatus = async (acr_id, status) => {
-        try {
-            const overrides = {};
-            if (status === 'approved' && overrideMode) {
-                const valid = overrideSessions.filter(s => s.time_in && s.time_out);
-                if (valid.length === 0) {
-                    toast.error("At least one valid session required for manual correction");
-                    return;
-                }
-                overrides.sessions = valid;
-            }
-
-            await attendanceService.updateCorrectionStatus(acr_id, status, reviewComment, overrides);
-            toast.success(`Request ${status} successfully`);
-            fetchCorrectionRequests();
-            fetchData(true, true); // Refetch live dashboard data silently
-            if (selectedRequestData && selectedRequestData.acr_id === acr_id) {
-                fetchRequestDetail(acr_id);
-            }
-        } catch (error) {
-            toast.error(error.message);
-        }
-    };
-
 
     const getStatusData = () => {
         // Create disjoint sets that sum to total headcount for a valid Pie Chart
@@ -1072,6 +1188,24 @@ const AttendanceMonitoring = () => {
         <>
             <style>
                 {`
+                .leaflet-container {
+                    background-color: ${
+                        activeTheme === 'dark' ? '#0f0f11' : 
+                        activeTheme === 'voyager' ? '#cadbe3' : 
+                        activeTheme === 'streets' ? '#aad3df' : 
+                        activeTheme === 'satellite' ? '#040810' : 
+                        '#e4edf2'
+                    } !important;
+                }
+                .leaflet-tile-pane {
+                    will-change: auto !important;
+                }
+                .leaflet-tile {
+                    image-rendering: -webkit-optimize-contrast;
+                    -webkit-backface-visibility: hidden;
+                    backface-visibility: hidden;
+                    transform: scale(1.002);
+                }
                 .user-marker-in, .user-marker-out, .user-marker-combined {
                     z-index: 500 !important;
                 }
@@ -1159,10 +1293,10 @@ const AttendanceMonitoring = () => {
                 }
                 `}
             </style>
-            <DashboardLayout title="Live Attendance" noPadding={true}>
-                <div className={`${activeTab === 'requests' ? 'h-[calc(100vh-64px)] overflow-hidden' : ''} p-4 flex flex-col space-y-4`}>
+            <DashboardLayout title="Live Attendance" noPadding={true} tourPageKey={PAGE_KEY} tourSteps={tourSteps}>
+                <div className={`${(activeTab === 'requests' || (activeTab === 'live' && activeView === 'map')) ? 'h-[calc(100vh-64px)] overflow-hidden' : ''} p-4 flex flex-col space-y-4`}>
                     {/* Tabs */}
-                    <div className="flex w-fit items-center gap-3 p-1.5 bg-[#f6f8fa] dark:bg-[#161b22] border border-[#d0d7de] dark:border-[#30363d] rounded-xl shrink-0">
+                    <div data-tour-id="attendance-tabs" className="flex w-fit items-center gap-3 p-1.5 bg-[#f6f8fa] dark:bg-[#161b22] border border-[#d0d7de] dark:border-[#30363d] rounded-xl shrink-0">
                         <button
                             onClick={() => setActiveTab('live')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${activeTab === 'live' ? 'bg-white dark:bg-slate-700 text-[#0969da] dark:text-[#f0f6fc] shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-202'}`}
@@ -1184,12 +1318,12 @@ const AttendanceMonitoring = () => {
                         </button>
                     </div>
 
-                    <div className={`${activeTab === 'requests' ? 'flex-1 min-h-0' : ''} flex flex-col space-y-4`} style={{ zoom: 0.8 }}>
+                    <div className={`${(activeTab === 'requests' || (activeTab === 'live' && activeView === 'map')) ? 'flex-1 min-h-0' : ''} flex flex-col space-y-4`} style={{ zoom: 0.8 }}>
 
                     {activeTab === 'live' ? (
                         <>
                             {/* Stats Cards */}
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                            <div data-tour-id="attendance-live-stats" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                                 {statCards.map((stat, index) => {
                                     const isSelected = statusFilter === stat.id;
                                     return (
@@ -1223,7 +1357,7 @@ const AttendanceMonitoring = () => {
                             <div className="flex-1 min-h-0 transition-colors duration-300 flex flex-col space-y-4">
 
                                 {/* Premium Control Center */}
-                                <div className="p-6 bg-white dark:bg-dark-card rounded-lg shadow-sm border border-slate-200 dark:border-github-dark-border space-y-6 shrink-0">
+                                <div data-tour-id="attendance-controls" className="p-6 bg-white dark:bg-dark-card rounded-lg shadow-sm border border-slate-200 dark:border-github-dark-border space-y-6 shrink-0">
                                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                                         <div className="flex flex-col">
                                             <div className="flex items-center gap-3">
@@ -1332,6 +1466,59 @@ const AttendanceMonitoring = () => {
                                                     )}
                                                 </AnimatePresence>
                                             </div>
+
+                                            <div className="relative">
+                                                <button
+                                                    onClick={() => setIsDesgDropdownOpen(!isDesgDropdownOpen)}
+                                                    className="pl-10 pr-8 py-2.5 text-xs rounded-lg border border-slate-200 dark:border-github-dark-border bg-slate-50 dark:bg-github-dark-subtle/20 text-slate-700 dark:text-github-dark-text outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner min-w-[155px] font-bold text-left flex items-center justify-between gap-2"
+                                                >
+                                                    <span className="truncate">
+                                                        {DESIGNATIONS.find(d => d.value === desgFilter)?.label || 'All Designations'}
+                                                    </span>
+                                                    <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 shrink-0 ${isDesgDropdownOpen ? 'rotate-180' : ''}`} />
+                                                </button>
+                                                <Filter size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+
+                                                <AnimatePresence>
+                                                    {isDesgDropdownOpen && (
+                                                        <>
+                                                            <div
+                                                                className="fixed inset-0 z-[80]"
+                                                                onClick={() => setIsDesgDropdownOpen(false)}
+                                                            />
+                                                            <motion.div
+                                                                initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                                exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                                                                transition={{ duration: 0.15 }}
+                                                                className="absolute top-full left-0 mt-1.5 w-full min-w-[180px] bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-github-dark-border rounded-xl shadow-2xl overflow-hidden z-[90]"
+                                                            >
+                                                                <div className="py-1 max-h-60 overflow-y-auto custom-scrollbar">
+                                                                    {DESIGNATIONS.map((desg) => {
+                                                                        const isSelected = desgFilter === desg.value;
+                                                                        return (
+                                                                            <button
+                                                                                key={desg.value}
+                                                                                onClick={() => {
+                                                                                    setDesgFilter(desg.value);
+                                                                                    setIsDesgDropdownOpen(false);
+                                                                                }}
+                                                                                className={`w-full flex items-center justify-between px-4 py-2.5 text-xs font-bold transition-colors text-left ${isSelected
+                                                                                        ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
+                                                                                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                                                                    }`}
+                                                                            >
+                                                                                <span>{desg.label}</span>
+                                                                                {isSelected && <Check size={12} className="text-indigo-500" />}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </motion.div>
+                                                        </>
+                                                    )}
+                                                </AnimatePresence>
+                                            </div>
                                         </div>
 
                                         {/* Uniform View Switcher */}
@@ -1365,7 +1552,7 @@ const AttendanceMonitoring = () => {
 
                                 <div className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${activeView === 'map' ? 'flex flex-col' : ''}`}>
                                     {activeView === 'table' ? (
-                                        <div className="bg-white dark:bg-dark-card rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-500 min-h-[450px]">
+                                        <div data-tour-id="attendance-live-monitor" className="bg-white dark:bg-dark-card rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-500 min-h-[450px]">
                                             <div className="overflow-x-auto custom-scrollbar">
                                                 <div className="min-w-[2000px]">
                                                     {/* Timeline Header */}
@@ -1557,6 +1744,7 @@ const AttendanceMonitoring = () => {
                                                             )}
                                                             <div
                                                                 onClick={() => setSelectedLiveUser(item)}
+                                                                data-tour-id={index === 0 ? "attendance-employee-card" : undefined}
                                                                 className={`bg-white dark:bg-dark-card rounded-lg border border-slate-200 dark:border-github-dark-border/60 hover:shadow-md transition-all duration-300 overflow-hidden group flex flex-col cursor-pointer ${item.status === 'Absent' ? 'opacity-70 grayscale-[0.3]' : ''}`}
                                                             >
                                                                 {/* Card Header */}
@@ -1699,7 +1887,7 @@ const AttendanceMonitoring = () => {
                                         </div>
                                     ) : activeView === 'map' ? (
                                         /* Map View Layout */
-                                        <div className="flex-1 min-h-0 flex gap-0 bg-white dark:bg-dark-card rounded-xl border border-slate-200 dark:border-github-dark-border shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-500 relative min-h-[450px]">
+                                        <div className="flex-1 min-h-0 flex gap-0 bg-white dark:bg-dark-card rounded-xl border border-slate-200 dark:border-github-dark-border shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-500 relative min-h-[450px]" style={{ zoom: 1.25 }}>
                                             <div className="flex-1 h-full relative">
                                                 <MapContainer
                                                     center={[20, 78]}
@@ -2013,7 +2201,7 @@ const AttendanceMonitoring = () => {
                         </>
                     ) : (
                     // Approvals Tab Content
-                    <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6">
+                    <div data-tour-id="attendance-requests-queue" className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6">
 
                         <div className="w-full lg:w-1/3 bg-white dark:bg-dark-card rounded-lg shadow-sm border border-slate-200 dark:border-github-dark-border overflow-hidden flex flex-col h-full shrink-0">
                             {/* Header and Search */}

@@ -17,7 +17,8 @@ const ALLOWED_UPDATE_FIELDS = new Set([
     "desg_id",
     "dept_id",
     "shift_id",
-    "user_type"
+    "user_type",
+    "force_password_change"
 ]);
 
 export const getAllUsers = async (orgId, includeWorkLocation = false) => {
@@ -29,7 +30,7 @@ export const getAllUsers = async (orgId, includeWorkLocation = false) => {
             'u.user_id', 'u.user_name', 'u.email', 'u.phone_no', 'u.user_type',
             'd.desg_name', 'd.desg_id', 'dep.dept_name', 'dep.dept_id',
             's.shift_name', 's.shift_id', 'u.profile_image_url',
-            'u.is_active', 'u.is_deleted', 'u.deleted_at'
+            'u.is_active', 'u.is_deleted', 'u.deleted_at', 'u.force_password_change'
         )
         .where('u.org_id', orgId);
 
@@ -61,7 +62,7 @@ export const getUserById = async (userId, orgId) => {
         .leftJoin('shifts as s', 'u.shift_id', 's.shift_id')
         .select(
             'u.user_id', 'u.user_name', 'u.email', 'u.phone_no', 'u.user_type', 'u.desg_id', 'u.dept_id', 'u.shift_id', 'u.org_id',
-            'u.profile_image_url', 'u.is_active', 'u.is_deleted', 'u.deleted_at',
+            'u.profile_image_url', 'u.is_active', 'u.is_deleted', 'u.deleted_at', 'u.force_password_change',
             'd.desg_name', 'dep.dept_name', 's.shift_name'
         )
         .where('u.user_id', userId)
@@ -80,7 +81,7 @@ export const getUserById = async (userId, orgId) => {
 };
 
 export const createUser = async (userData, authInfo, profileImageBuffer = null) => {
-    const { user_name, user_password, email, phone_no, desg_id, dept_id, shift_id, user_type } = userData;
+    const { user_name, user_password, email, phone_no, desg_id, dept_id, shift_id, user_type, force_password_change } = userData;
 
     if (user_type === 'admin') throw new AppError("Cannot create Admin users via the panel", 403);
     if (authInfo.initiatorRole === 'hr' && user_type !== 'employee') throw new AppError("HR can only create Employees", 403);
@@ -123,7 +124,8 @@ export const createUser = async (userData, authInfo, profileImageBuffer = null) 
         const [insertedId] = await trx("users").insert({
             org_id: authInfo.orgId, user_name, user_code: userCode, user_password: hashedPassword,
             email, phone_no: phoneToSave, desg_id: desg_id || null, dept_id: dept_id || null,
-            shift_id: shift_id || null, user_type: user_type || "employee"
+            shift_id: shift_id || null, user_type: user_type || "employee",
+            force_password_change: force_password_change === 1 || force_password_change === true || force_password_change === 'true' ? 1 : 0
         });
 
         if (!insertedId) throw new AppError("Failed to create user", 500);
@@ -199,6 +201,8 @@ export const updateUser = async (userId, updatesData, authInfo, profileImageBuff
                 if (updatesData.user_password?.trim()) {
                     updates.user_password = await bcrypt.hash(updatesData.user_password, 12);
                 }
+            } else if (key === "force_password_change") {
+                updates.force_password_change = (updatesData.force_password_change === 1 || updatesData.force_password_change === true || updatesData.force_password_change === 'true') ? 1 : 0;
             } else {
                 updates[key] = updatesData[key] === "" ? null : updatesData[key];
             }
@@ -440,7 +444,7 @@ export const permanentlyDeleteUser = async (userId) => {
         await trx('attendance_correction_requests').where('reviewed_by', userId).update({ reviewed_by: null });
         await trx('attendance_records').where('altered_by', userId).update({ altered_by: null });
         await trx('daily_attendance').where('adjusted_by', userId).update({ adjusted_by: null });
-        await trx('leave_requests').where('reviewed_by', userId).update({ reviewed_by: null });
+        await trx('leave_request').where('reviewed_by', userId).update({ reviewed_by: null });
 
         await trx('attendance_correction_requests').where('user_id', userId).del();
         await trx('user_work_locations').where('user_id', userId).del();
@@ -479,14 +483,20 @@ export const permanentlyDeleteUser = async (userId) => {
             }
         }
 
-        const leaveRequests = await trx('leave_requests').where('user_id', userId).select('lr_id');
-        const leaveIds = leaveRequests.map(lr => lr.lr_id);
-        if (leaveIds.length > 0) {
-            const leaveAttachments = await trx('leave_attachments').whereIn('leave_id', leaveIds).select('file_key');
-            for (const attachment of leaveAttachments) await safeDeleteS3(attachment.file_key);
-            await trx('leave_attachments').whereIn('leave_id', leaveIds).del();
-            await trx('leave_requests').whereIn('lr_id', leaveIds).del();
+        const leaveRequests = await trx('leave_request').where('user_id', userId).select('lr_id', 'attachments');
+        for (const lr of leaveRequests) {
+            if (lr.attachments) {
+                const atts = typeof lr.attachments === 'string' ? JSON.parse(lr.attachments) : lr.attachments;
+                if (Array.isArray(atts)) {
+                    for (const att of atts) {
+                        if (att.file_key) {
+                            await safeDeleteS3(att.file_key);
+                        }
+                    }
+                }
+            }
         }
+        await trx('leave_request').where('user_id', userId).del();
 
         const feedbacks = await trx('feedback').where('user_id', userId).select('feedback_id');
         const feedbackIds = feedbacks.map(f => f.feedback_id);
@@ -608,6 +618,8 @@ export const bulkCreateUsers = async (file, authInfo) => {
             const phone = getVal(row, "phone") || getVal(row, "phone_no");
             const type = getVal(row, "type") || "employee";
             const password = getVal(row, "password") || `${name}-${authInfo.orgId}`;
+            const forcePassVal = getVal(row, "force password change") || getVal(row, "force_password_change") || getVal(row, "force change on first login") || "";
+            const force_password_change = forcePassVal.toLowerCase().trim() === "true" || forcePassVal.trim() === "1";
 
             if (type.toLowerCase() === 'admin') {
                 results.failure_count++; results.errors.push(`Row ${rowNumber}: Cannot create Admin users`); continue;
@@ -643,7 +655,8 @@ export const bulkCreateUsers = async (file, authInfo) => {
                 user_password: hashedPassword, user_type: type,
                 dept_id: deptMap[(getVal(row, "department") || getVal(row, "dept"))?.toLowerCase()],
                 desg_id: desgMap[(getVal(row, "designation") || getVal(row, "role"))?.toLowerCase()],
-                shift_id: shiftMap[getVal(row, "shift")?.toLowerCase()]
+                shift_id: shiftMap[getVal(row, "shift")?.toLowerCase()],
+                force_password_change: force_password_change ? 1 : 0
             });
 
             currentCount++;
@@ -852,6 +865,8 @@ export const bulkCreateUsersFromJson = async (users, authInfo) => {
             const desgName = row["Designation"] || row["designation"] || row["role"] || row["Role"];
             const shiftName = row["Shift"] || row["shift"];
             const password = row["Password"] || row["password"] || `${name}-${orgId}`;
+            const forcePassVal = row['Force Password Change'] || row['force_password_change'] || row['Force change on first login'] || '';
+            const force_password_change = forcePassVal.toString().toLowerCase().trim() === 'true' || forcePassVal.toString().trim() === '1';
 
             if (!name || (!email && !phone)) {
                 results.failure_count++;
@@ -900,7 +915,8 @@ export const bulkCreateUsersFromJson = async (users, authInfo) => {
                     user_type: 'employee',
                     dept_id: deptId,
                     desg_id: desgId,
-                    shift_id: shiftId
+                    shift_id: shiftId,
+                    force_password_change: force_password_change ? 1 : 0
                 });
 
                 currentCount++;

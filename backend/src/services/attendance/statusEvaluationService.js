@@ -25,6 +25,33 @@ export function calculateDurationHours(start, end) {
     return parseFloat((diff / (1000 * 60 * 60)).toFixed(2));
 }
 
+export function getLocalNow(timezone = 'UTC') {
+    const now = new Date();
+    try {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: timezone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        const parts = formatter.formatToParts(now);
+        const year = parts.find(p => p.type === 'year').value;
+        const month = parts.find(p => p.type === 'month').value;
+        const day = parts.find(p => p.type === 'day').value;
+        let hour = parts.find(p => p.type === 'hour').value;
+        const minute = parts.find(p => p.type === 'minute').value;
+        const second = parts.find(p => p.type === 'second').value;
+        if (hour === '24') hour = '00';
+        return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}.000Z`);
+    } catch (e) {
+        return now;
+    }
+}
+
 //  Late Arrival
 /**
  * Calculate late arrival and grace period compliance.
@@ -100,7 +127,8 @@ export function evaluateStatus(rules, data) {
     }
 
     // 2. Absent Check (Less than 4 hours total at checkout)
-    if (totalHours < 4 && data.event_type === "time_out") {
+    // Only apply if the shift timing has a start_time (i.e. it is not an open/flexible shift)
+    if (rules?.shift_timing?.start_time && totalHours < 4 && data.event_type === "time_out") {
         return "ABSENT";
     }
 
@@ -328,7 +356,7 @@ function normalizeDate(d) {
  * Evaluate the attendance status for a single user on a single date.
  * Uses cron-processed daily_attendance when available, otherwise derives dynamically.
  */
-function evaluateDayStatus({ dateStr, todayStr, dayRecords, dailyRecord, holiday, leave, rules }) {
+function evaluateDayStatus({ dateStr, todayStr, dayRecords, dailyRecord, holiday, leave, rules, timezone = 'UTC' }) {
     let status = null;
     let totalHours = 0;
     let firstIn = null;
@@ -353,12 +381,14 @@ function evaluateDayStatus({ dateStr, todayStr, dayRecords, dailyRecord, holiday
         const hasOpenSession = dayRecords.some(r => !r.time_out && r.status !== 'MISSED_PUNCH');
         const hasMissedPunch = dayRecords.some(r => r.status === 'MISSED_PUNCH');
 
+        const localNow = getLocalNow(timezone);
+
         for (const r of dayRecords) {
             if (r.time_in && r.time_out) {
                 totalHours += calculateDurationHours(r.time_in, r.time_out);
             } else if (r.time_in && !r.time_out && r.status !== 'MISSED_PUNCH') {
-                // Active session – count running hours
-                totalHours += calculateDurationHours(r.time_in, new Date());
+                // Active session – count running hours using local time
+                totalHours += calculateDurationHours(r.time_in, localNow);
             }
         }
         totalHours = parseFloat(totalHours.toFixed(2));
@@ -512,6 +542,7 @@ export async function getDailySummary({ org_id, user_id = null, date_from, date_
         .select(
             'users.user_id', 'users.user_name', 'users.org_id', 'users.shift_id',
             'users.profile_image_url',
+            'users.user_type',
             'designations.desg_name',
             'shifts.shift_name',
             'shifts.policy_rules'
@@ -549,13 +580,15 @@ export async function getDailySummary({ org_id, user_id = null, date_from, date_
             .where('org_id', org_id)
             .where('holiday_date', '>=', date_from)
             .where('holiday_date', '<=', date_to),
-        attendanceDB('leave_requests')
-            .where('status', 'Approved')
-            .where('start_date', '<=', date_to)
-            .where('end_date', '>=', date_from)
+        attendanceDB('leave_request as lr')
+            .leftJoin('leave_policies_rules as lpr', 'lr.rule_id', 'lpr.rule_id')
+            .select('lr.*', 'lpr.name as leave_type')
+            .where('lr.status', 'Approved')
+            .where('lr.start_date', '<=', date_to)
+            .where('lr.end_date', '>=', date_from)
             .modify(qb => {
-                if (user_id) qb.where('user_id', user_id);
-                else qb.whereIn('user_id', users.map(u => u.user_id));
+                if (user_id) qb.where('lr.user_id', user_id);
+                else qb.whereIn('lr.user_id', users.map(u => u.user_id));
             })
     ]);
 
@@ -633,7 +666,7 @@ export async function getDailySummary({ org_id, user_id = null, date_from, date_
                 return dateStr >= s && dateStr <= e;
             });
 
-            const result = evaluateDayStatus({ dateStr, todayStr, dayRecords, dailyRecord, holiday, leave, rules });
+            const result = evaluateDayStatus({ dateStr, todayStr, dayRecords, dailyRecord, holiday, leave, rules, timezone });
             // Serialize time fields to plain strings (prevent UTC shift from JS Date serialization)
             const serializedSessions = dayRecords.map(r => ({
                 ...r,

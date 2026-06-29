@@ -8,14 +8,17 @@ import ResponsiveRoute from "./components/ResponsiveRoute";
 import { AuthProvider } from "./context/AuthContext";
 import { SocketProvider } from "./context/SocketContext";
 import { NotificationProvider } from "./context/NotificationContext";
+import { TourProvider } from "./context/TourContext";
 import ProtectedRoute from "./context/protection";
 import PublicRoute from "./context/publicRoute";
 import Unauthorized from "./pages/Unauthorized";
+import TourOverlay from "./components/tour/TourOverlay.jsx";
 import TestRoute from "./context/TestRoute";
 import Login from "./pages/user-auth/Login";
 import ForgotPassword from "./pages/user-auth/ForgotPassword";
 import SuperAdminLogin from "./pages/user-auth/SuperAdminLogin";
 import Register from "./pages/user-auth/Register";
+import ChangePassword from "./pages/user-auth/ChangePassword";
 import WordCaptchaTest from "./pages/test/WordCaptchaTest"; // only for testing
 
 import AdminDashboard from "./pages/dashboard/AdminDashboard"
@@ -40,6 +43,7 @@ import ChatPage from "./pages/collaboration/ChatPage";
 import LabourManagement from "./pages/labour/LabourManagement"
 import PayrollDashboard from "./pages/payroll/PayrollDashboard";
 import SalaryPackages from "./pages/payroll/SalaryPackages";
+import Documentation from "./pages/documentation/Documentation";
 
 // Organization Pages Imports
 
@@ -129,6 +133,7 @@ function SeoManager() {
     const isLoginPage = path === "/login";
     const isSignupPage = path === "/signup";
     const isForgotPassword = path === "/forgot-password";
+    const isChangePassword = path === "/change-password";
 
     const title = isPublicLanding
       ? "MANO Attendance | Smart Attendance & Workforce Management"
@@ -138,7 +143,9 @@ function SeoManager() {
           ? "Self-Onboarding Signup | MANO Attendance"
           : isForgotPassword
             ? "Forgot Password | MANO Attendance"
-            : "MANO Attendance";
+            : isChangePassword
+              ? "Update Password | MANO Attendance"
+              : "MANO Attendance";
 
     const description = isPublicLanding
       ? "MANO Attendance: The ultimate smart attendance and workforce management platform with geofencing, AI insights, and payroll reports."
@@ -146,9 +153,13 @@ function SeoManager() {
         ? "Access the MANO Attendance secure login portal. Manage your workforce, track live attendance, and generate reports."
         : isSignupPage
           ? "Register a new organization and administrator account on the MANO Attendance smart workforce platform."
-          : "MANO Attendance workforce platform.";
+          : isForgotPassword
+            ? "Forgot Password | MANO Attendance"
+            : isChangePassword
+              ? "Update your password on first login to secure your account."
+              : "MANO Attendance workforce platform.";
 
-    const canonicalPath = isPublicLanding ? "" : isLoginPage ? "login" : isSignupPage ? "signup" : isForgotPassword ? "forgot-password" : "";
+    const canonicalPath = isPublicLanding ? "" : isLoginPage ? "login" : isSignupPage ? "signup" : isForgotPassword ? "forgot-password" : isChangePassword ? "change-password" : "";
     const canonicalUrl = `${SEO_BASE_URL}/${canonicalPath}`;
     const robots = isPublicLanding || isLoginPage || isSignupPage || isForgotPassword ? "index, follow" : "noindex, nofollow";
 
@@ -276,6 +287,8 @@ function App() {
           <ScaleManager />
         <ToastContainer enableMultiContainer containerId="defaultContainer" position="bottom-center" autoClose={3000} limit={1} hideProgressBar={true} pauseOnHover={false} pauseOnFocusLoss={false} closeOnClick={true} />
         <ToastContainer enableMultiContainer containerId="macOSNotifications" position="top-right" autoClose={3000} limit={3} hideProgressBar={true} closeButton={false} newestOnTop={true} transition={Slide} />
+        <TourProvider>
+        <TourOverlay />
         <Routes>
 
           {/* Website Landing (shown first when not logged in) */}
@@ -299,6 +312,7 @@ function App() {
 
           <Route element={<ProtectedRoute />}>
             <Route path="/unauthorized" element={<Unauthorized />} />
+            <Route path="/change-password" element={<ChangePassword />} />
             {/* Common Routes (Accessible by all authenticated users: Admin, HR, Employee) */}
             <Route element={<ProtectedRoute allowedRoles={['admin', 'hr', 'employee', 'super_admin']} />}>
               <Route path="/dashboard" element={<DashboardHandler />} />
@@ -308,6 +322,7 @@ function App() {
               <Route path="/daily-activity" element={<ResponsiveRoute DesktopComponent={DailyActivity} MobileComponent={DailyActivityMobile} />} />
               <Route path="/apply-leave" element={<ResponsiveRoute DesktopComponent={LeaveApplication} MobileComponent={MobileLeaveApplication} />} />
               <Route path="/collaboration" element={<ResponsiveRoute DesktopComponent={ChatPage} MobileComponent={MobileChatPage} />} />
+              <Route path="/documentation" element={<Documentation />} />
 
               {/* Mobile-Only Pages fallback */}
               <Route path="/notifications" element={<MobileNotifications />} />
@@ -347,6 +362,7 @@ function App() {
           </Route>
 
         </Routes>
+        </TourProvider>
       </NotificationProvider>
     </SocketProvider>
   </AuthProvider>

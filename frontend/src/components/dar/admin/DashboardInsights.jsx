@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import api from '../../../services/api';
 import { toast } from 'react-toastify';
+import MinimalSelect from '../../MinimalSelect';
 
 const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
     // --- ENHANCED FILTER STATE ---
@@ -18,8 +19,15 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
         startDate: new Date(new Date().setDate(new Date().getDate() - 6)).toISOString().split('T')[0], // Last 7 days
         endDate: new Date().toISOString().split('T')[0],
         dept: 'All',
+        desg: 'All',
         search: ''
     });
+
+    const designationsList = React.useMemo(() => {
+        const desgs = allUsers.map(u => u.designation).filter(d => d && d !== '-');
+        return ["All", ...new Set(desgs)].sort((a, b) => a.localeCompare(b));
+    }, [allUsers]);
+
 
     const [loadingData, setLoadingData] = useState(false);
 
@@ -256,9 +264,13 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
         let dynamicTotalEmp = totalEmpCount;
         let relevantUsers = allUsers;
         if (filters.dept !== 'All') {
-            relevantUsers = allUsers.filter(u => u.dept === filters.dept);
-            dynamicTotalEmp = relevantUsers.length;
+            relevantUsers = relevantUsers.filter(u => u.dept === filters.dept);
         }
+
+        if (filters.desg && filters.desg !== 'All') {
+            relevantUsers = relevantUsers.filter(u => u.designation === filters.desg);
+        }
+        dynamicTotalEmp = relevantUsers.length;
 
         let targetDays = 0;
         let loopDate = new Date(filters.startDate);
@@ -373,9 +385,25 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
                     holRes.data.holidays.forEach(h => holidaySet.add(h.holiday_date));
                 }
 
+                const userMap = {};
+                allUsers.forEach(u => {
+                    userMap[u.userId] = u;
+                });
+
                 if (filters.dept !== 'All') {
                     rawData = rawData.filter(a => a.user_dept === filters.dept);
                     prevData = prevData.filter(a => a.user_dept === filters.dept);
+                }
+
+                if (filters.desg && filters.desg !== 'All') {
+                    rawData = rawData.filter(a => {
+                        const u = userMap[a.user_id];
+                        return u && u.designation === filters.desg;
+                    });
+                    prevData = prevData.filter(a => {
+                        const u = userMap[a.user_id];
+                        return u && u.designation === filters.desg;
+                    });
                 }
                 if (filters.search.trim()) {
                     const q = filters.search.toLowerCase();
@@ -419,19 +447,28 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
                     </div>
 
                     <div className="flex items-center gap-3 w-full sm:w-auto">
-                        <div className="relative">
-                            <select
-                                value={filters.dept}
-                                onChange={(e) => setFilters(prev => ({ ...prev, dept: e.target.value }))}
-                                className="appearance-none pl-3 pr-8 py-2 bg-slate-50 dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-lg text-sm text-slate-700 dark:text-github-dark-text focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
-                            >
-                                <option value="All">All Depts</option>
-                                {departments.map(d => (
-                                    <option key={d} value={d}>{d}</option>
-                                ))}
-                            </select>
-                            <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                        </div>
+                        <MinimalSelect
+                            options={[
+                                { value: 'All', label: 'All Depts' },
+                                ...departments.map(d => ({ value: d, label: d }))
+                            ]}
+                            value={filters.dept}
+                            onChange={(val) => setFilters(prev => ({ ...prev, dept: val }))}
+                            placeholder="All Depts"
+                            icon={Filter}
+                        />
+
+                        <MinimalSelect
+                            options={[
+                                { value: 'All', label: 'All Designations' },
+                                ...designationsList.filter(d => d !== "All").map(d => ({ value: d, label: d }))
+                            ]}
+                            value={filters.desg}
+                            onChange={(val) => setFilters(prev => ({ ...prev, desg: val }))}
+                            placeholder="All Designations"
+                            searchable={true}
+                            icon={Filter}
+                        />
 
                         {/* Preserved Controls */}
                         <div className="flex items-center gap-2 bg-slate-50 dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-lg px-2 py-1.5 hidden md:flex">
@@ -468,7 +505,7 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5">
-                <div className="bg-white dark:bg-dark-card p-3.5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between">
+                <div data-tour-id="dar-admin-insights-submission" className="bg-white dark:bg-dark-card p-3.5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between">
                     <div>
                         <div className="text-slate-500 text-[9px] font-bold uppercase tracking-wide mb-1">Submission Rate</div>
                         <div className="text-lg font-black text-slate-800 dark:text-github-dark-text">{stats.submissionRate}%</div>
@@ -480,7 +517,7 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
                         <FileText size={16} className="text-emerald-500" />
                     </div>
                 </div>
-                <div className="bg-white dark:bg-dark-card p-3.5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between">
+                <div data-tour-id="dar-admin-insights-activity" className="bg-white dark:bg-dark-card p-3.5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between">
                     <div className="min-w-0 flex-1 mr-1.5">
                         <div className="text-slate-500 text-[9px] font-bold uppercase tracking-wide mb-1">Top Activity</div>
                         <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 truncate" title={stats.topActivity}>{stats.topActivity}</div>
@@ -490,7 +527,7 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
                         <BarChart3 size={16} className="text-indigo-500" />
                     </div>
                 </div>
-                <div className="bg-white dark:bg-dark-card p-3.5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between">
+                <div data-tour-id="dar-admin-insights-workhours" className="bg-white dark:bg-dark-card p-3.5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between">
                     <div>
                         <div className="text-slate-500 text-[9px] font-bold uppercase tracking-wide mb-1">Average Work Hours</div>
                         <div className="flex items-baseline gap-1.5 mt-0.5">
@@ -507,7 +544,7 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
                         <Clock size={16} className="text-purple-500" />
                     </div>
                 </div>
-                <div className="bg-white dark:bg-dark-card p-3.5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between">
+                <div data-tour-id="dar-admin-insights-idletime" className="bg-white dark:bg-dark-card p-3.5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex items-center justify-between">
                     <div>
                         <div className="text-slate-500 text-[9px] font-bold uppercase tracking-wide mb-1">Average Idle Time</div>
                         <div className="text-lg font-black text-orange-500 dark:text-orange-400">{stats.avgIdle}</div>
@@ -520,7 +557,7 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
             </div>
 
             {/* Row 2: Workload Trend (Area Chart) */}
-            <div className="lg:col-span-2 bg-white dark:bg-dark-card p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border">
+            <div data-tour-id="dar-admin-insights-workload" className="lg:col-span-2 bg-white dark:bg-dark-card p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border">
                 <div className="flex items-center justify-between mb-5">
                     <h3 className="font-bold text-slate-800 dark:text-github-dark-text flex items-center gap-2 text-sm">
                         <BarChart3 size={18} className="text-indigo-500" />
@@ -565,7 +602,7 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
             {/* Row 3: Department Breakdown & Capacity Alerts */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Department Activity Stacked Bar */}
-                <div className="lg:col-span-2 bg-white dark:bg-dark-card p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex flex-col">
+                <div data-tour-id="dar-admin-insights-focus" className="lg:col-span-2 bg-white dark:bg-dark-card p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex flex-col">
                     <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text mb-6 flex items-center gap-2">
                         <Building size={20} className="text-orange-500" /> Department Focus
                     </h3>
@@ -605,7 +642,7 @@ const DashboardInsights = ({ departments, allUsers, onOpenConfig }) => {
 
 
                 {/* Employee Consistency */}
-                <div className="bg-white dark:bg-dark-card p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex flex-col">
+                <div data-tour-id="dar-admin-insights-consistency" className="bg-white dark:bg-dark-card p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-github-dark-border flex flex-col">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="text-lg font-bold text-slate-800 dark:text-github-dark-text flex items-center gap-2">
                             <FileText size={20} className="text-indigo-500" /> Employee Consistency

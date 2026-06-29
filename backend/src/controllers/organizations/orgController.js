@@ -2,12 +2,14 @@ import catchAsync from '../../utils/catchAsync.js';
 import { attendanceDB } from '../../config/database.js';
 import AppError from '../../utils/AppError.js';
 import bcrypt from 'bcrypt';
+import { deactivateExpiredOrganizations } from '../../cron/cleanupScheduler.js';
 
 export const createOrganization = catchAsync(async (req, res, next) => {
     const {
         org_name, org_code, subscription_plan, subscription_expiry, grace_period_days, max_users,
         contact_name, contact_email, contact_phone,
-        admin_name, admin_email, admin_phone, admin_password
+        admin_name, admin_email, admin_phone, admin_password,
+        gst_number, pan_number
     } = req.body;
 
     if (!org_name || !org_code) {
@@ -18,11 +20,31 @@ export const createOrganization = catchAsync(async (req, res, next) => {
         throw new AppError("Admin email and password are required to setup the organization", 400);
     }
 
+    const cleanOrgCode = org_code.trim().toUpperCase();
+
+    // Check uniqueness
+    const existingOrg = await attendanceDB('organizations').where('org_code', cleanOrgCode).first();
+    if (existingOrg) {
+        throw new AppError("Organization code is already registered.", 400);
+    }
+
+    const existingUser = await attendanceDB('users').where('email', admin_email.trim().toLowerCase()).first();
+    if (existingUser) {
+        throw new AppError("Administrator email is already registered.", 400);
+    }
+
+    if (admin_phone) {
+        const existingPhone = await attendanceDB('users').where('phone_no', admin_phone.trim()).first();
+        if (existingPhone) {
+            throw new AppError("Administrator phone number is already registered.", 400);
+        }
+    }
+
     // Wrap in transaction to ensure both org and admin user are created or neither
     const insertedId = await attendanceDB.transaction(async (trx) => {
         const [orgId] = await trx('organizations').insert({
             org_name,
-            org_code: org_code.toUpperCase(),
+            org_code: cleanOrgCode,
             contact_name: contact_name || null,
             contact_email: contact_email || null,
             contact_phone: contact_phone || null,
@@ -31,12 +53,14 @@ export const createOrganization = catchAsync(async (req, res, next) => {
             is_trial: (subscription_plan || 'Trial') === 'Trial' ? 1 : 0,
             status: 'active',
             max_users: max_users || 50,
-            last_user_number: 1 // We're creating the first user right now
+            last_user_number: 1, // We're creating the first user right now
+            gst_number: gst_number || null,
+            pan_number: pan_number || null
         });
 
         // Create the admin user for this organization
         const hashedPassword = await bcrypt.hash(admin_password, 10);
-        const userCode = `${org_code.toUpperCase()}001`;
+        const userCode = `${cleanOrgCode}001`;
 
         await trx('users').insert({
             org_id: orgId,
@@ -57,6 +81,9 @@ export const createOrganization = catchAsync(async (req, res, next) => {
 });
 
 export const getOrganizations = catchAsync(async (req, res, next) => {
+    // Sync expired organizations dynamically to keep database status up to date
+    await deactivateExpiredOrganizations();
+
     // Left join users table to get counts
     const orgs = await attendanceDB('organizations as o')
         .leftJoin('users as u', 'o.org_id', 'u.org_id')
@@ -74,8 +101,9 @@ export const getOrganizations = catchAsync(async (req, res, next) => {
 export const updateOrganization = catchAsync(async (req, res, next) => {
     const { id } = req.params;
     const {
-        org_name, status, subscription_plan, subscription_expiry, grace_period_days, max_users,
-        contact_name, contact_email, contact_phone
+        org_name, org_code, status, subscription_plan, subscription_expiry, grace_period_days, max_users,
+        contact_name, contact_email, contact_phone,
+        gst_number, pan_number
     } = req.body;
 
     const org = await attendanceDB('organizations').where('org_id', id).first();
@@ -86,12 +114,52 @@ export const updateOrganization = catchAsync(async (req, res, next) => {
     if (status !== undefined) updates.status = status;
     if (subscription_plan !== undefined) updates.subscription_plan = subscription_plan;
     if (subscription_expiry !== undefined) updates.subscription_expiry = subscription_expiry;
+    if (grace_period_days !== undefined) updates.grace_period_days = grace_period_days;
     if (max_users !== undefined) updates.max_users = max_users;
     if (contact_name !== undefined) updates.contact_name = contact_name;
     if (contact_email !== undefined) updates.contact_email = contact_email;
     if (contact_phone !== undefined) updates.contact_phone = contact_phone;
+    if (gst_number !== undefined) updates.gst_number = gst_number;
+    if (pan_number !== undefined) updates.pan_number = pan_number;
 
-    await attendanceDB('organizations').where('org_id', id).update(updates);
+    if (org_code !== undefined) {
+        const cleanOrgCode = org_code.trim().toUpperCase();
+        if (cleanOrgCode !== org.org_code) {
+            // Check uniqueness of the new code
+            const existingOrg = await attendanceDB('organizations').where('org_code', cleanOrgCode).first();
+            if (existingOrg) {
+                throw new AppError("Organization code is already registered.", 400);
+            }
+            updates.org_code = cleanOrgCode;
+        }
+    }
+
+    if (Object.keys(updates).length > 0) {
+        await attendanceDB.transaction(async (trx) => {
+            if (updates.org_code) {
+                const oldPrefix = org.org_code;
+                const newPrefix = updates.org_code;
+                const users = await trx('users').where('org_id', id);
+                for (const user of users) {
+                    if (user.user_code) {
+                        if (user.user_code.startsWith(oldPrefix + "-")) {
+                            const suffix = user.user_code.substring(oldPrefix.length);
+                            const newUserCode = `${newPrefix}${suffix}`;
+                            await trx('users').where('user_id', user.user_id).update({ user_code: newUserCode });
+                        } else if (user.user_code.startsWith(oldPrefix)) {
+                            const suffix = user.user_code.substring(oldPrefix.length);
+                            const newUserCode = `${newPrefix}${suffix}`;
+                            await trx('users').where('user_id', user.user_id).update({ user_code: newUserCode });
+                        }
+                    }
+                }
+            }
+            await trx('organizations').where('org_id', id).update(updates);
+        });
+
+        // Immediately sync database status in case expiry date was set to a past date
+        await deactivateExpiredOrganizations();
+    }
 
     res.status(200).json({ success: true, message: "Organization updated successfully" });
 });

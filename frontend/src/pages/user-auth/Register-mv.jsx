@@ -22,10 +22,14 @@ import {
     Check,
     Loader2,
     Sun,
-    Moon
+    Moon,
+    Globe,
+    ChevronDown
 } from "lucide-react";
 import api from "../../services/api";
 import LoadingScreen from "../../components/LoadingScreen";
+import PhoneInput from "../../components/PhoneInput";
+import { validatePhone, validateEmail } from "../../utils/validation";
 
 const INDUSTRIES = [
     "Technology & Software",
@@ -82,12 +86,15 @@ const MobileRegisterPage = () => {
         org_code: "",
         address: "",
         industry: "Technology & Software",
+        country: "",
+        state: "",
+        city: "",
         
         contact_name: "",
         contact_phone: "",
         contact_email: "",
-        tax_identity: "Neither",
-        tax_code: "",
+        gst_number: "",
+        pan_number: "",
         max_users: 50,
 
         isAdminSameAsPoc: true,
@@ -98,29 +105,173 @@ const MobileRegisterPage = () => {
         confirm_password: ""
     });
 
+    // Geo location data
+    const [geoCountries, setGeoCountries] = useState([]);
+    const [geoStates, setGeoStates] = useState([]);
+    const [geoCities, setGeoCities] = useState([]);
+    const [geoLoading, setGeoLoading] = useState({ countries: false, states: false, cities: false });
+
+    // Fetch countries on mount
+    useEffect(() => {
+        const fetchCountries = async () => {
+            setGeoLoading(prev => ({ ...prev, countries: true }));
+            try {
+                const res = await api.get("/geo/countries");
+                if (res.data?.ok) {
+                    setGeoCountries(res.data.data);
+                }
+            } catch (err) {
+                console.error("Failed to load countries:", err);
+            } finally {
+                setGeoLoading(prev => ({ ...prev, countries: false }));
+            }
+        };
+        fetchCountries();
+    }, []);
+
+    // Fetch states when country changes
+    useEffect(() => {
+        if (!formData.country) {
+            setGeoStates([]);
+            setGeoCities([]);
+            return;
+        }
+        const fetchStates = async () => {
+            setGeoLoading(prev => ({ ...prev, states: true }));
+            setGeoStates([]);
+            setGeoCities([]);
+            setFormData(prev => ({ ...prev, state: "", city: "" }));
+            try {
+                const res = await api.get(`/geo/states/${formData.country}`);
+                if (res.data?.ok) {
+                    setGeoStates(res.data.data);
+                }
+            } catch (err) {
+                console.error("Failed to load states:", err);
+            } finally {
+                setGeoLoading(prev => ({ ...prev, states: false }));
+            }
+        };
+        fetchStates();
+    }, [formData.country]);
+
+    // Fetch cities when state changes
+    useEffect(() => {
+        if (!formData.country || !formData.state) {
+            setGeoCities([]);
+            return;
+        }
+        const fetchCities = async () => {
+            setGeoLoading(prev => ({ ...prev, cities: true }));
+            setGeoCities([]);
+            setFormData(prev => ({ ...prev, city: "" }));
+            try {
+                const res = await api.get(`/geo/cities/${formData.country}/${formData.state}`);
+                if (res.data?.ok) {
+                    setGeoCities(res.data.data);
+                }
+            } catch (err) {
+                console.error("Failed to load cities:", err);
+            } finally {
+                setGeoLoading(prev => ({ ...prev, cities: false }));
+            }
+        };
+        fetchCities();
+    }, [formData.country, formData.state]);
+
+    // Auto-sync phone code when country changes
+    useEffect(() => {
+        if (!formData.country || geoCountries.length === 0) return;
+        const selectedCountry = geoCountries.find(c => c.iso2 === formData.country);
+        if (selectedCountry?.phone_code) {
+            let dialCode = selectedCountry.phone_code.trim();
+            if (!dialCode.startsWith('+')) dialCode = `+${dialCode}`;
+            
+            const syncPrefix = (currentPhone) => {
+                let localNumber = currentPhone;
+                const sortedPrefixes = [...geoCountries]
+                    .filter(c => c.phone_code)
+                    .map(c => {
+                        let dc = c.phone_code.trim();
+                        if (!dc.startsWith('+')) dc = `+${dc}`;
+                        return dc;
+                    })
+                    .sort((a, b) => b.length - a.length);
+
+                for (const prefix of sortedPrefixes) {
+                    if (currentPhone.startsWith(prefix)) {
+                        localNumber = currentPhone.slice(prefix.length);
+                        break;
+                    }
+                }
+                
+                if (localNumber.startsWith('+')) {
+                    localNumber = localNumber.slice(1);
+                }
+                
+                const cleanLocal = localNumber.replace(/^\+/, '');
+                return `${dialCode}${cleanLocal}`;
+            };
+
+            setFormData(prev => ({
+                ...prev,
+                contact_phone: syncPrefix(prev.contact_phone || ""),
+                admin_phone: prev.admin_phone ? syncPrefix(prev.admin_phone) : dialCode
+            }));
+        }
+    }, [formData.country, geoCountries]);
+
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [isOrgCodeManuallyEdited, setIsOrgCodeManuallyEdited] = useState(false);
     const [successData, setSuccessData] = useState(null);
 
-    // Auto-generate code based on company name
+    // Auto-generate organization code based on organization name
     useEffect(() => {
         if (!isOrgCodeManuallyEdited && formData.org_name) {
-            let code = formData.org_name.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-            code = code.substring(0, 5);
-            if (code.length >= 3) {
-                setFormData(prev => ({ ...prev, org_code: code }));
-            } else if (code.length > 0) {
-                setFormData(prev => ({ ...prev, org_code: (code + "ORG").substring(0, 5) }));
+            const name = formData.org_name;
+            const words = name.trim().split(/[\s\-_]+/).map(w => w.replace(/[^a-zA-Z0-9]/g, "")).filter(Boolean);
+            let code = "";
+            if (words.length >= 3) {
+                code = words.map(w => w[0]).join("");
+            } else if (words.length === 2) {
+                const firstWord = words[0];
+                const secondWord = words[1];
+                if (firstWord.length >= 2) {
+                    code = firstWord.substring(0, 2) + secondWord.charAt(0);
+                } else {
+                    code = firstWord.charAt(0) + secondWord.substring(0, 2);
+                }
+            } else if (words.length === 1) {
+                code = words[0];
+            }
+
+            let cleanCode = code.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+            if (cleanCode.length > 10) {
+                cleanCode = cleanCode.substring(0, 10);
+            }
+            if (cleanCode.length < 3 && cleanCode.length > 0) {
+                const originalClean = name.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+                if (originalClean.length >= 3) {
+                    cleanCode = originalClean.substring(0, 5);
+                } else {
+                    cleanCode = (cleanCode + "ORG").substring(0, 5);
+                }
+            }
+            if (cleanCode) {
+                setFormData(prev => ({ ...prev, org_code: cleanCode }));
             }
         }
     }, [formData.org_name, isOrgCodeManuallyEdited]);
 
     const handleTextChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({ ...prev, [name]: value }));
         if (name === "org_code") {
             setIsOrgCodeManuallyEdited(true);
+            const cleaned = value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+            setFormData(prev => ({ ...prev, org_code: cleaned }));
+        } else {
+            setFormData(prev => ({ ...prev, [name]: value }));
         }
     };
 
@@ -140,6 +291,18 @@ const MobileRegisterPage = () => {
                 toast.error("Organization code must be 3-10 alphanumeric characters with no spaces.");
                 return;
             }
+            if (!formData.country) {
+                toast.error("Please select a country.");
+                return;
+            }
+            if (!formData.state) {
+                toast.error("Please select a state.");
+                return;
+            }
+            if (!formData.city) {
+                toast.error("Please select a city.");
+                return;
+            }
         }
         if (step === 2) {
             if (!formData.contact_name.trim()) {
@@ -150,31 +313,40 @@ const MobileRegisterPage = () => {
                 toast.error("Contact phone number is required.");
                 return;
             }
-            if (!formData.contact_email.trim() || !/\S+@\S+\.\S+/.test(formData.contact_email)) {
+            if (!validatePhone(formData.contact_phone)) {
+                toast.error("Please enter a valid primary contact phone number according to the country code.");
+                return;
+            }
+            if (!validateEmail(formData.contact_email)) {
                 toast.error("A valid contact email is required.");
                 return;
             }
-            if (formData.tax_identity !== "Neither") {
-                if (!formData.tax_code.trim()) {
-                    toast.error(`Please enter your ${formData.tax_identity} identification code.`);
+            const hasGst = !!formData.gst_number?.trim();
+            const hasPan = !!formData.pan_number?.trim();
+
+            if ((hasGst && !hasPan) || (!hasGst && hasPan)) {
+                toast.error("Please enter both GST and PAN, or leave both fields blank.");
+                return;
+            }
+
+            if (hasGst && hasPan) {
+                const upperGst = formData.gst_number.trim().toUpperCase();
+                const upperPan = formData.pan_number.trim().toUpperCase();
+
+                const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+                const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+
+                if (!gstRegex.test(upperGst)) {
+                    toast.error("Invalid GST format. It must be in the format: 27ABCDE1234F1Z5.");
                     return;
                 }
-                const upperTaxCode = formData.tax_code.trim().toUpperCase();
-                if (formData.tax_identity === "PAN") {
-                    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-                    if (!panRegex.test(upperTaxCode)) {
-                        toast.error("Invalid PAN format. It must be in the format: ABCDE1234F (5 letters, 4 digits, 1 letter).");
-                        return;
-                    }
-                } else if (formData.tax_identity === "GST") {
-                    const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-                    if (!gstRegex.test(upperTaxCode)) {
-                        toast.error("Invalid GST format. It must be in the format: 27ABCDE1234F1Z5.");
-                        return;
-                    }
+                if (!panRegex.test(upperPan)) {
+                    toast.error("Invalid PAN format. It must be in the format: ABCDE1234F (5 letters, 4 digits, 1 letter).");
+                    return;
                 }
-                // Automatically save the upper-cased code back to state
-                setFormData(prev => ({ ...prev, tax_code: upperTaxCode }));
+
+                // Update to uppercase
+                setFormData(prev => ({ ...prev, gst_number: upperGst, pan_number: upperPan }));
             }
         }
 
@@ -190,6 +362,11 @@ const MobileRegisterPage = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
+        if (step < 3) {
+            nextStep();
+            return;
+        }
+
         const finalAdminEmail = formData.isAdminSameAsPoc ? formData.contact_email : formData.admin_email;
         const finalAdminName = formData.isAdminSameAsPoc ? formData.contact_name : formData.admin_name;
         const finalAdminPhone = formData.isAdminSameAsPoc ? formData.contact_phone : formData.admin_phone;
@@ -199,7 +376,7 @@ const MobileRegisterPage = () => {
                 toast.error("Administrator name is required.");
                 return;
             }
-            if (!formData.admin_email.trim() || !/\S+@\S+\.\S+/.test(formData.admin_email)) {
+            if (!validateEmail(formData.admin_email)) {
                 toast.error("A valid administrator email is required.");
                 return;
             }
@@ -234,9 +411,12 @@ const MobileRegisterPage = () => {
                 admin_password: formData.admin_password,
                 address: formData.address,
                 industry: formData.industry,
-                tax_identity: formData.tax_identity,
-                tax_code: formData.tax_identity === "Neither" ? null : formData.tax_code,
-                max_users: Number(formData.max_users)
+                gst_number: formData.gst_number || null,
+                pan_number: formData.pan_number || null,
+                max_users: Number(formData.max_users),
+                country: formData.country || null,
+                state: formData.state || null,
+                city: formData.city || null
             };
 
             const response = await api.post("/auth/onboard", payload);
@@ -393,6 +573,80 @@ const MobileRegisterPage = () => {
                                             </div>
                                         </div>
 
+                                        {/* Country */}
+                                        <div className="space-y-2">
+                                            <label className="block text-xs font-normal text-slate-500 dark:text-slate-400 px-1">
+                                                Country
+                                            </label>
+                                            <div className="relative group">
+                                                <Globe className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-400 pointer-events-none" />
+                                                <select
+                                                    name="country"
+                                                    value={formData.country}
+                                                    onChange={handleTextChange}
+                                                    className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-[#30363d] rounded-lg py-3.5 pl-12 pr-5 text-slate-900 dark:text-white font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-sm shadow-sm appearance-none"
+                                                >
+                                                    <option value="">Select Country</option>
+                                                    {geoCountries.map(c => (
+                                                        <option key={c.iso2} value={c.iso2}>{c.emoji} {c.name}</option>
+                                                    ))}
+                                                </select>
+                                                {geoLoading.countries && (
+                                                    <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 size-4 text-slate-400 animate-spin" />
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* State */}
+                                        <div className="space-y-2">
+                                            <label className="block text-xs font-normal text-slate-500 dark:text-slate-400 px-1">
+                                                State / Province
+                                            </label>
+                                            <div className="relative group">
+                                                <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-400 pointer-events-none" />
+                                                <select
+                                                    name="state"
+                                                    value={formData.state}
+                                                    onChange={handleTextChange}
+                                                    disabled={!formData.country}
+                                                    className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-[#30363d] rounded-lg py-3.5 pl-12 pr-5 text-slate-900 dark:text-white font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-sm shadow-sm appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    <option value="">{formData.country ? (geoLoading.states ? 'Loading...' : 'Select State') : 'Select country first'}</option>
+                                                    {geoStates.map(s => (
+                                                        <option key={s.state_code} value={s.state_code}>{s.name}</option>
+                                                    ))}
+                                                </select>
+                                                {geoLoading.states && (
+                                                    <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 size-4 text-slate-400 animate-spin" />
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* City */}
+                                        <div className="space-y-2">
+                                            <label className="block text-xs font-normal text-slate-500 dark:text-slate-400 px-1">
+                                                City
+                                            </label>
+                                            <div className="relative group">
+                                                <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-400 pointer-events-none" />
+                                                <select
+                                                    name="city"
+                                                    value={formData.city}
+                                                    onChange={handleTextChange}
+                                                    disabled={!formData.state}
+                                                    className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-[#30363d] rounded-lg py-3.5 pl-12 pr-5 text-slate-900 dark:text-white font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-sm shadow-sm appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    <option value="">{formData.state ? (geoLoading.cities ? 'Loading...' : 'Select City') : 'Select state first'}</option>
+                                                    {geoCities.map(c => (
+                                                        <option key={c.id} value={c.name}>{c.name}</option>
+                                                    ))}
+                                                </select>
+                                                {geoLoading.cities && (
+                                                    <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 size-4 text-slate-400 animate-spin" />
+                                                )}
+                                            </div>
+                                        </div>
+
                                         <div className="space-y-2">
                                             <label className="block text-xs font-normal text-slate-500 dark:text-slate-400 px-1">
                                                 Firm Address
@@ -455,18 +709,13 @@ const MobileRegisterPage = () => {
                                             <label className="block text-xs font-normal text-slate-500 dark:text-slate-400 px-1">
                                                 Primary Contact Phone *
                                             </label>
-                                            <div className="relative group">
-                                                <Phone className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-400" />
-                                                <input
-                                                    type="tel"
-                                                    name="contact_phone"
-                                                    value={formData.contact_phone}
-                                                    onChange={handleTextChange}
-                                                    required
-                                                    className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-[#30363d] rounded-lg py-3.5 pl-12 pr-5 text-slate-900 dark:text-white font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all placeholder:text-slate-400 text-sm shadow-sm"
-                                                    placeholder="+1 234 567 8900"
-                                                />
-                                            </div>
+                                            <PhoneInput
+                                                value={formData.contact_phone}
+                                                onChange={(val) => setFormData(prev => ({ ...prev, contact_phone: val }))}
+                                                variant="register-mobile"
+                                                externalCountries={geoCountries.length > 0 ? geoCountries : null}
+                                                disableDropdown={true}
+                                            />
                                         </div>
 
                                         <div className="space-y-2">
@@ -490,45 +739,37 @@ const MobileRegisterPage = () => {
 
                                         <div className="space-y-2">
                                             <label className="block text-xs font-normal text-slate-500 dark:text-slate-400 px-1">
-                                                Tax Identity
+                                                GST Number (Optional)
                                             </label>
-                                            <div className="grid grid-cols-3 gap-2">
-                                                {["GST", "PAN", "Neither"].map(type => (
-                                                    <button
-                                                        key={type}
-                                                        type="button"
-                                                        onClick={() => setFormData(prev => ({ ...prev, tax_identity: type }))}
-                                                        className={`py-2.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all ${
-                                                            formData.tax_identity === type
-                                                                ? "bg-indigo-600 border-indigo-600 text-white"
-                                                                : "bg-white dark:bg-[#0d1117] border-slate-200 dark:border-[#30363d] text-slate-500 dark:text-slate-400"
-                                                        }`}
-                                                    >
-                                                        {type}
-                                                    </button>
-                                                ))}
+                                            <div className="relative group">
+                                                <FileText className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-400" />
+                                                <input
+                                                    type="text"
+                                                    name="gst_number"
+                                                    value={formData.gst_number || ""}
+                                                    onChange={handleTextChange}
+                                                    className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-[#30363d] rounded-lg py-3.5 pl-12 pr-5 text-slate-900 dark:text-white font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all placeholder:text-slate-400 text-sm shadow-sm"
+                                                    placeholder="Enter GST (e.g. 27ABCDE1234F1Z5)"
+                                                />
                                             </div>
                                         </div>
 
-                                        {formData.tax_identity !== "Neither" && (
-                                            <div className="space-y-2">
-                                                <label className="block text-xs font-normal text-slate-500 dark:text-slate-400 px-1">
-                                                    {formData.tax_identity} ID Value *
-                                                </label>
-                                                <div className="relative group">
-                                                    <FileText className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-400" />
-                                                    <input
-                                                        type="text"
-                                                        name="tax_code"
-                                                        value={formData.tax_code}
-                                                        onChange={handleTextChange}
-                                                        required
-                                                        className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-[#30363d] rounded-lg py-3.5 pl-12 pr-5 text-slate-900 dark:text-white font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all placeholder:text-slate-400 text-sm shadow-sm"
-                                                        placeholder={`Enter ${formData.tax_identity} code`}
-                                                    />
-                                                </div>
+                                        <div className="space-y-2">
+                                            <label className="block text-xs font-normal text-slate-500 dark:text-slate-400 px-1">
+                                                PAN Number (Optional)
+                                            </label>
+                                            <div className="relative group">
+                                                <FileText className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-400" />
+                                                <input
+                                                    type="text"
+                                                    name="pan_number"
+                                                    value={formData.pan_number || ""}
+                                                    onChange={handleTextChange}
+                                                    className="w-full bg-white dark:bg-[#0d1117] border border-slate-200 dark:border-[#30363d] rounded-lg py-3.5 pl-12 pr-5 text-slate-900 dark:text-white font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all placeholder:text-slate-400 text-sm shadow-sm"
+                                                    placeholder="Enter PAN (e.g. ABCDE1234F)"
+                                                />
                                             </div>
-                                        )}
+                                        </div>
                                     </>
                                 )}
 
@@ -664,7 +905,7 @@ const MobileRegisterPage = () => {
                                                 Workspace Ready
                                             </h3>
                                             <p className="text-slate-500 dark:text-slate-400 text-xs max-w-[280px] mx-auto leading-relaxed">
-                                                Your organization has been successfully registered on the platform. Use these credentials to login.
+                                                Your organization has been registered and is pending approval from the Super Admin. Use these credentials to log in once approved.
                                             </p>
                                         </div>
 

@@ -57,11 +57,19 @@ export const requestAndRegisterFCMToken = async () => {
 
             const swUrl = `/firebase-messaging-sw.js?${configParams}`;
 
-            // Explicitly register the service worker to ensure reliable token fetching in dev environments
-            const registration = await navigator.serviceWorker.register(swUrl, {
-                scope: '/'
-            });
-            console.log('✅ Service Worker registered with scope:', registration.scope);
+            let registration = null;
+            try {
+                registration = await navigator.serviceWorker.register(swUrl, {
+                    scope: '/'
+                });
+                console.log('✅ Service Worker registered with scope:', registration.scope);
+            } catch (swErr) {
+                if (swErr.name === 'SecurityError' || swErr.message?.includes('SSL certificate error')) {
+                    console.warn('⚠️ FCM ServiceWorker registration skipped: SSL certificate error on localhost HTTPS. (Service Workers require trusted SSL certs or http://localhost during development).');
+                    return null;
+                }
+                throw swErr;
+            }
 
             console.log('🔑 Fetching FCM token using VAPID Key:', VAPID_KEY);
             const token = await getToken(messaging, { 
@@ -80,9 +88,13 @@ export const requestAndRegisterFCMToken = async () => {
             console.warn('⚠️ Notification permission denied by the user.');
         }
     } catch (error) {
-        console.error('❌ Error getting or registering FCM token:', error);
-        if (error.message && error.message.includes('vapid')) {
-            console.error('💡 TIP: The VAPID key you provided may be invalid or truncated. Firebase Web Push VAPID keys are usually long base64 strings starting with a "B". Please verify the key under Settings > Cloud Messaging > Web Push certificates in the Firebase Console.');
+        if (error.name === 'SecurityError' || error.message?.includes('SSL certificate error')) {
+            console.warn('⚠️ SSL certificate issue blocked Service Worker registration on dev server.');
+        } else {
+            console.error('❌ Error getting or registering FCM token:', error);
+            if (error.message && error.message.includes('vapid')) {
+                console.error('💡 TIP: The VAPID key you provided may be invalid or truncated. Firebase Web Push VAPID keys are usually long base64 strings starting with a "B". Please verify the key under Settings > Cloud Messaging > Web Push certificates in the Firebase Console.');
+            }
         }
     }
     return null;

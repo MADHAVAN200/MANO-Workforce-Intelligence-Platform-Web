@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, ChevronLeft, ChevronRight, X, ChevronDown, ChevronUp } from 'lucide-react';
 
-const DatePicker = ({ label, value, onChange, placeholder = "Select date", minDate, maxDate, compact = false }) => {
+const DatePicker = ({ label, value, onChange, placeholder = "Select date", minDate, maxDate, compact = false, clearable = false }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
     const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
@@ -163,7 +163,19 @@ const DatePicker = ({ label, value, onChange, placeholder = "Select date", minDa
                     </span>
                 </div>
 
-                <ChevronDown size={14} className={`text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 shrink-0 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+                {clearable && value ? (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            clearDate(e);
+                        }}
+                        className="p-1 text-slate-400 hover:text-red-500 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 shrink-0"
+                    >
+                        <X size={14} />
+                    </button>
+                ) : (
+                    <ChevronDown size={14} className="text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 shrink-0" />
+                )}
             </div>
 
             {isOpen && (

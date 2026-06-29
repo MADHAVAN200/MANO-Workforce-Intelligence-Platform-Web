@@ -29,8 +29,41 @@ import {
   Sun, Moon, Layers, ChevronDown, Edit2, Save, X
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useTour } from '../../context/TourContext';
 import { toast } from 'react-toastify';
 import { useNavigate } from 'react-router-dom';
+
+const PAGE_KEY = 'admin_geofencing';
+const TOUR_STEPS = [
+    {
+        targetId: 'geo-map',
+        title: 'Geofence Map',
+        description: 'Visualize all your office locations and their allowed punch-in radiuses on the live map.',
+    },
+    {
+        targetId: 'geo-sidebar-locations',
+        title: 'Locations List',
+        description: 'Create and edit geofenced locations, adjust coordinates, and set the allowed punch-in radius. Note: A radius that is too small (e.g., < 50m) can block clock-ins due to indoor GPS drift/fluctuation, causing false attendance failures. Conversely, a radius that is too large (e.g., > 200m) compromises geofence security by allowing employees to clock in from nearby roads or cafes. A balanced range of 80m–150m is recommended.',
+    },
+    {
+        targetId: 'geo-sidebar-users',
+        title: 'Assign Staff',
+        description: 'Select a location to see which employees are allowed to clock in from there, and manage their assignments.',
+    },
+];
+
+const createMarkerIcon = (color) => {
+  return L.divIcon({
+    html: `<span style="display: flex; justify-content: center; align-items: center; width: 30px; height: 30px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.15));">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${color}" width="28" height="28" stroke="#ffffff" stroke-width="1.5">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+      </svg>
+    </span>`,
+    className: 'custom-marker-icon',
+    iconSize: [30, 30],
+    iconAnchor: [15, 30],
+  });
+};
 
 const GeoFencing = () => {
   const navigate = useNavigate();
@@ -39,6 +72,7 @@ const GeoFencing = () => {
 
   // --- STATE ---
   const { avatarTimestamp } = useAuth();
+  const { startTour, hasSeenPage, wasSkippedThisSession, tourEnabled } = useTour();
   const [locations, setLocations] = useState([]);
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [loadingLocations, setLoadingLocations] = useState(false);
@@ -46,6 +80,7 @@ const GeoFencing = () => {
 
   const [users, setUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState(null);
 
   const [radiusDraft, setRadiusDraft] = useState(100);
 
@@ -399,6 +434,7 @@ const GeoFencing = () => {
     loadUsers();
   }, []);
 
+
   const handleRadiusChange = (newRadius) => {
     setRadiusDraft(newRadius);
 
@@ -552,11 +588,11 @@ const GeoFencing = () => {
   }
 
   return (
-    <DashboardLayout title="Geo-Fencing" noPadding={true}>
+    <DashboardLayout title="Geo-Fencing" noPadding={true} tourPageKey={PAGE_KEY} tourSteps={TOUR_STEPS}>
       <div className="flex h-[calc(100vh-64px)] w-full overflow-hidden p-3 gap-3 bg-slate-50 dark:bg-dark-bg">
 
         {/* Left Panel: Locations List as a Card */}
-        <div className="w-[380px] flex-shrink-0 bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl shadow-sm flex flex-col overflow-hidden">
+        <div data-tour-id="geo-sidebar-locations" className="w-[380px] flex-shrink-0 bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl shadow-sm flex flex-col overflow-hidden">
 
           {/* Header / Search */}
           <div className="p-4 border-b border-slate-200 dark:border-github-dark-border bg-slate-50/50 dark:bg-github-dark-subtle/50 space-y-3">
@@ -587,56 +623,72 @@ const GeoFencing = () => {
 
           {/* Locations List */}
           <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-            {locations.map(loc => (
-              <div
-                key={loc.location_id}
-                onClick={() => setSelectedLocation(loc)}
-                className={`p-3 rounded-lg border transition-all cursor-pointer group ${loc.is_active === 0
-                  ? 'opacity-60'
-                  : ''
-                  } ${selectedLocation && selectedLocation.location_id === loc.location_id
-                    ? 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-900/50 shadow-sm'
-                    : 'bg-white dark:bg-dark-card border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                  }`}
-              >
-                <div className="flex justify-between items-start mb-1">
-                  <h4 className={`font-semibold text-sm ${selectedLocation && selectedLocation.location_id === loc.location_id ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-800 dark:text-github-dark-text'}`}>{loc.location_name}</h4>
-                  {loc.is_active === 1 ? (
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"></div>
-                  ) : (
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-slate-400"></div>
-                      <span className="text-[10px] text-slate-400">Inactive</span>
+            {locations.map(loc => {
+              const selectedUser = selectedUserId ? users.find(u => u.user_id === selectedUserId) : null;
+              const isUserAssignedLocation = selectedUser && selectedUser.work_locations?.some(wl => Number(wl.location_id) === Number(loc.location_id));
+              return (
+                <div
+                  key={loc.location_id}
+                  onClick={() => setSelectedLocation(loc)}
+                  className={`p-3 rounded-lg border transition-all cursor-pointer group ${loc.is_active === 0
+                    ? 'opacity-60'
+                    : ''
+                    } ${selectedLocation && selectedLocation.location_id === loc.location_id
+                      ? 'bg-indigo-50 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-900/50 shadow-sm'
+                      : 'bg-white dark:bg-dark-card border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                    } ${isUserAssignedLocation
+                      ? 'ring-2 ring-emerald-500/50 border-emerald-500 bg-emerald-50/10 dark:bg-emerald-950/5'
+                      : ''
+                    }`}
+                >
+                  <div className="flex justify-between items-start mb-1">
+                    <div className="flex flex-col gap-0.5">
+                      <h4 className={`font-semibold text-sm ${selectedLocation && selectedLocation.location_id === loc.location_id ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-800 dark:text-github-dark-text'}`}>{loc.location_name}</h4>
+                      {isUserAssignedLocation && (
+                        <span className="text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-1.5 py-0.5 rounded-full w-max flex items-center gap-0.5 mt-0.5">
+                          Assigned
+                        </span>
+                      )}
                     </div>
-                  )}
+                    {loc.is_active === 1 ? (
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]"></div>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <span className="text-[10px] text-slate-400">Inactive</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-github-dark-muted line-clamp-1 mb-2">{loc.address}</p>
+                  <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-github-dark-muted">
+                    <span className="flex items-center gap-1"><Crosshair size={10} /> {loc.radius}m</span>
+                    <span className="flex items-center gap-1">
+                      <Users size={10} />
+                      {users.filter(u =>
+                        u.work_locations?.some(
+                          w => w.location_id === Number(loc.location_id)
+                        )
+                      ).length} Active
+                    </span>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-github-dark-muted line-clamp-1 mb-2">{loc.address}</p>
-                <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-github-dark-muted">
-                  <span className="flex items-center gap-1"><Crosshair size={10} /> {loc.radius}m</span>
-                  <span className="flex items-center gap-1">
-                    <Users size={10} />
-                    {users.filter(u =>
-                      u.work_locations?.some(
-                        w => w.location_id === Number(loc.location_id)
-                      )
-                    ).length} Active
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
-        {/* Center: Real Map View as a Card */}
-        <div className="flex-1 relative bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl shadow-sm overflow-hidden">
-          {(selectedLocation || showCreateModal) && (
+        {/* Center Panel: Map Area */}
+        <div data-tour-id="geo-map" className="flex-1 relative bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl shadow-sm overflow-hidden">
+          {(selectedLocation || showCreateModal || locations.length > 0) && (
             <MapContainer
               center={
                 showCreateModal && newGeo.latitude && newGeo.longitude
                   ? [newGeo.latitude, newGeo.longitude]
                   : selectedLocation
                     ? [Number(selectedLocation.latitude), Number(selectedLocation.longitude)]
-                    : [20, 78]
+                    : locations.length > 0
+                      ? [Number(locations[0].latitude), Number(locations[0].longitude)]
+                      : [20, 78]
               }
               zoom={15}
               className="h-full w-full"
@@ -689,7 +741,10 @@ const GeoFencing = () => {
               {/* Create Mode Marker */}
               {showCreateModal && newGeo.latitude && newGeo.longitude && (
                 <>
-                  <Marker position={[newGeo.latitude, newGeo.longitude]} />
+                  <Marker 
+                    position={[newGeo.latitude, newGeo.longitude]} 
+                    icon={createMarkerIcon("#6366f1")}
+                  />
                   <Circle
                     center={[newGeo.latitude, newGeo.longitude]}
                     radius={newGeo.radius}
@@ -698,21 +753,22 @@ const GeoFencing = () => {
                 </>
               )}
 
-              {/* View/Edit Mode Marker */}
-              {!showCreateModal && selectedLocation && (
+              {/* Edit Mode Marker */}
+              {!showCreateModal && isEditingLocation && editDraftCoords && (
                 <>
                   <Marker
                     position={[
-                      editDraftCoords ? editDraftCoords.latitude : Number(selectedLocation.latitude),
-                      editDraftCoords ? editDraftCoords.longitude : Number(selectedLocation.longitude),
+                      editDraftCoords.latitude,
+                      editDraftCoords.longitude,
                     ]}
+                    icon={createMarkerIcon("#6366f1")}
                   />
                   <Circle
                     center={[
-                      editDraftCoords ? editDraftCoords.latitude : Number(selectedLocation.latitude),
-                      editDraftCoords ? editDraftCoords.longitude : Number(selectedLocation.longitude),
+                      editDraftCoords.latitude,
+                      editDraftCoords.longitude,
                     ]}
-                    radius={selectedLocation.radius}
+                    radius={editDraftCoords.radius}
                     pathOptions={{
                       color: "#6366f1",
                       fillColor: "#6366f1",
@@ -721,6 +777,56 @@ const GeoFencing = () => {
                   />
                 </>
               )}
+
+              {/* View Mode Markers (All Locations) */}
+              {!showCreateModal && !isEditingLocation && locations.map(loc => {
+                const isCurrentSelected = selectedLocation && selectedLocation.location_id === loc.location_id;
+                const selectedUser = selectedUserId ? users.find(u => u.user_id === selectedUserId) : null;
+                const isUserAssigned = selectedUser && selectedUser.work_locations?.some(wl => Number(wl.location_id) === Number(loc.location_id));
+                
+                let markerColor = "#94a3b8"; // Slate / neutral
+                if (isCurrentSelected) {
+                  markerColor = "#6366f1"; // Indigo
+                } else if (isUserAssigned) {
+                  markerColor = "#10b981"; // Emerald
+                }
+
+                return (
+                  <React.Fragment key={loc.location_id}>
+                    <Marker
+                      position={[Number(loc.latitude), Number(loc.longitude)]}
+                      icon={createMarkerIcon(markerColor)}
+                      eventHandlers={{
+                        click: () => {
+                          setSelectedLocation(loc);
+                        }
+                      }}
+                    />
+                    {isCurrentSelected && (
+                      <Circle
+                        center={[Number(loc.latitude), Number(loc.longitude)]}
+                        radius={loc.radius}
+                        pathOptions={{
+                          color: "#6366f1",
+                          fillColor: "#6366f1",
+                          fillOpacity: 0.2,
+                        }}
+                      />
+                    )}
+                    {isUserAssigned && !isCurrentSelected && (
+                      <Circle
+                        center={[Number(loc.latitude), Number(loc.longitude)]}
+                        radius={loc.radius}
+                        pathOptions={{
+                          color: "#10b981",
+                          fillColor: "#10b981",
+                          fillOpacity: 0.15,
+                        }}
+                      />
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </MapContainer>
           )}
 
@@ -980,7 +1086,7 @@ const GeoFencing = () => {
         </div>
 
         {/* Right Panel: Employee Assignment as a Card */}
-        <div className="w-[380px] flex-shrink-0 bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl shadow-sm flex flex-col overflow-hidden">
+        <div data-tour-id="geo-sidebar-users" className="w-[380px] flex-shrink-0 bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl shadow-sm flex flex-col overflow-hidden">
           <div className="p-4 border-b border-slate-200 dark:border-github-dark-border bg-slate-50/50 dark:bg-github-dark-subtle/50">
             <div className="flex justify-between items-center">
               <h3 className="font-semibold text-slate-800 dark:text-github-dark-text flex items-center gap-2">
@@ -988,52 +1094,107 @@ const GeoFencing = () => {
               </h3>
             </div>
           </div>
-          <div className="p-2 flex-1 overflow-y-auto space-y-1 custom-scrollbar">
+          <div className="p-2 flex-1 overflow-y-auto space-y-4 custom-scrollbar">
             {loadingUsers && (
               <p className="text-sm text-slate-400 px-3">Loading users...</p>
             )}
 
-            {!loadingUsers && users.map(user => {
-              const selectedLocId = selectedLocation
-                ? Number(selectedLocation.location_id)
-                : null;
-
-              const isAssigned =
+            {!loadingUsers && (() => {
+              const selectedLocId = selectedLocation ? Number(selectedLocation.location_id) : null;
+              
+              const assignedUsers = users.filter(user => 
                 selectedLocId != null &&
                 Array.isArray(user.work_locations) &&
-                user.work_locations.some(
-                  wl => wl.location_id === selectedLocId
+                user.work_locations.some(wl => wl.location_id === selectedLocId)
+              );
+              
+              const unassignedUsers = users.filter(user => 
+                selectedLocId == null ||
+                !Array.isArray(user.work_locations) ||
+                !user.work_locations.some(wl => wl.location_id === selectedLocId)
+              );
+
+              const renderUserCard = (user) => {
+                const isAssigned = selectedLocId != null &&
+                  Array.isArray(user.work_locations) &&
+                  user.work_locations.some(wl => wl.location_id === selectedLocId);
+                  
+                const assignedLocs = locations.filter(loc =>
+                  user.work_locations?.some(wl => Number(wl.location_id) === Number(loc.location_id))
                 );
-              return (
-                <div
-                  key={user.user_id}
-                  className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg transition-colors group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-xs font-bold text-indigo-700 dark:text-indigo-400 overflow-hidden">
-                      {user.profile_image_url ? (
-                        <img src={`${user.profile_image_url}?t=${avatarTimestamp}`} alt={user.user_name} className="w-full h-full object-cover" />
-                      ) : (
-                        user.user_name.charAt(0)
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-800 dark:text-github-dark-text line-clamp-1">{user.user_name}</p>
-                      <p className="text-xs text-slate-500 dark:text-github-dark-muted line-clamp-1">{user.desg_name}</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => toggleUserAssignment(user.user_id, isAssigned)}
-                    className={`p-1.5 rounded-md transition-all ${isAssigned
-                      ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-                      : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-600 dark:hover:text-slate-200'
-                      }`}
+                const isSelected = selectedUserId === user.user_id;
+
+                return (
+                  <div
+                    key={user.user_id}
+                    onClick={() => setSelectedUserId(prev => prev === user.user_id ? null : user.user_id)}
+                    className={`flex items-center justify-between p-3 rounded-lg transition-all cursor-pointer group ${
+                      isSelected
+                        ? 'bg-indigo-50/80 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 ring-2 ring-indigo-500/10'
+                        : 'border border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                    }`}
                   >
-                    {isAssigned ? <Check size={16} /> : <Plus size={16} />}
-                  </button>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-xs font-bold text-indigo-700 dark:text-indigo-400 overflow-hidden flex-shrink-0">
+                        {user.profile_image_url ? (
+                          <img src={`${user.profile_image_url}?t=${avatarTimestamp}`} alt={user.user_name} className="w-full h-full object-cover" />
+                        ) : (
+                          user.user_name.charAt(0)
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 dark:text-github-dark-text truncate">{user.user_name}</p>
+                        <p className="text-[11px] text-slate-400 truncate">{user.desg_name}</p>
+                        <div className="flex flex-wrap gap-1 mt-1 max-w-[200px]">
+                          {assignedLocs.map(loc => (
+                            <span key={loc.location_id} className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/20 truncate max-w-[120px]" title={loc.location_name}>
+                              {loc.location_name}
+                            </span>
+                          ))}
+                          {assignedLocs.length === 0 && (
+                            <span className="text-[9px] text-slate-400 italic">No locations</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleUserAssignment(user.user_id, isAssigned);
+                      }}
+                      className={`p-1.5 rounded-md transition-all flex-shrink-0 ${isAssigned
+                        ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
+                        : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-600 dark:hover:text-slate-200'
+                        }`}
+                    >
+                      {isAssigned ? <Check size={16} /> : <Plus size={16} />}
+                    </button>
+                  </div>
+                );
+              };
+
+              return (
+                <div className="space-y-4">
+                  {assignedUsers.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider px-2">Assigned Staff ({assignedUsers.length})</p>
+                      {assignedUsers.map(renderUserCard)}
+                    </div>
+                  )}
+                  {unassignedUsers.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">
+                        {assignedUsers.length > 0 ? "Available Staff" : "All Staff"} ({unassignedUsers.length})
+                      </p>
+                      {unassignedUsers.map(renderUserCard)}
+                    </div>
+                  )}
+                  {assignedUsers.length === 0 && unassignedUsers.length === 0 && (
+                    <p className="text-sm text-slate-400 px-3 text-center py-4">No staff found</p>
+                  )}
                 </div>
               );
-            })}
+            })()}
           </div>
         </div>
 

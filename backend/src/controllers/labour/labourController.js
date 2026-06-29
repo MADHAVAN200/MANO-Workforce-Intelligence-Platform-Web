@@ -73,18 +73,29 @@ export const updateSite = catchAsync(async (req, res) => {
     const { id } = req.params;
     const { site_name, location_details, status, end_date } = req.body;
 
+    const finalEndDate = status === 'Completed' ? (end_date || new Date()) : null;
+    const dateStr = finalEndDate ? new Date(finalEndDate).toISOString().split('T')[0] : null;
+
     const affected = await attendanceDB('labour_sites')
         .where('site_id', id)
         .update({
             site_name,
             location_details,
             status,
-            end_date: status === 'Completed' ? (end_date || attendanceDB.fn.now()) : null,
+            end_date: dateStr,
             updated_at: attendanceDB.fn.now()
         });
 
     if (affected === 0) {
         throw new AppError('Site not found', 404);
+    }
+
+    if (status === 'Completed' && dateStr) {
+        // Delete all attendance records logged on or after the completion date
+        await attendanceDB('labour_attendance')
+            .where('site_id', id)
+            .andWhere('date', '>=', dateStr)
+            .del();
     }
 
     res.json({
@@ -346,6 +357,18 @@ export const saveSiteAttendance = catchAsync(async (req, res) => {
 
     if (!site_id || !date || !Array.isArray(roster)) {
         throw new AppError('site_id, date, and roster array are required', 400);
+    }
+
+    const siteObj = await attendanceDB('labour_sites')
+        .where('site_id', site_id)
+        .first();
+
+    if (siteObj && siteObj.status === 'Completed' && siteObj.end_date) {
+        const compDateStr = new Date(siteObj.end_date).toISOString().split('T')[0];
+        const attDateStr = new Date(date).toISOString().split('T')[0];
+        if (attDateStr >= compDateStr) {
+            throw new AppError('Site is marked as Completed. Attendance is only allowed for dates before the completion date.', 400);
+        }
     }
 
     await attendanceDB.transaction(async (trx) => {
@@ -1206,7 +1229,7 @@ export const downloadBulkTemplate = catchAsync(async (req, res) => {
         worksheet.getCell(`E${i}`).dataValidation = {
             type: 'list',
             allowBlank: true,
-            formulae: ['"Daily Wage,Fixed Salary"']
+            formulae: ['"Daily Wage"']
         };
         
         if (sites.length > 0) {

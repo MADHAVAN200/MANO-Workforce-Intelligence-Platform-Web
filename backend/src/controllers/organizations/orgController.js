@@ -150,6 +150,25 @@ export const updateOrganization = catchAsync(async (req, res, next) => {
                             const suffix = user.user_code.substring(oldPrefix.length);
                             const newUserCode = `${newPrefix}${suffix}`;
                             await trx('users').where('user_id', user.user_id).update({ user_code: newUserCode });
+                        } else {
+                            // Robust Fallback: Handles codes not matching oldPrefix
+                            let suffix = '';
+                            const hyphenIndex = user.user_code.lastIndexOf('-');
+                            if (hyphenIndex !== -1) {
+                                suffix = user.user_code.substring(hyphenIndex);
+                                const newUserCode = `${newPrefix}${suffix}`;
+                                await trx('users').where('user_id', user.user_id).update({ user_code: newUserCode });
+                            } else {
+                                const match = user.user_code.match(/\d+$/);
+                                if (match) {
+                                    suffix = match[0];
+                                    const newUserCode = `${newPrefix}-${suffix.padStart(3, '0')}`;
+                                    await trx('users').where('user_id', user.user_id).update({ user_code: newUserCode });
+                                } else {
+                                    const newUserCode = `${newPrefix}-${String(user.user_id).padStart(3, '0')}`;
+                                    await trx('users').where('user_id', user.user_id).update({ user_code: newUserCode });
+                                }
+                            }
                         }
                     }
                 }

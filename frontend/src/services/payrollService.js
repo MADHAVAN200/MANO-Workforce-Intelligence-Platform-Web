@@ -80,9 +80,24 @@ const payrollService = {
         return response.data;
     },
 
+    // Unlock payroll for a single employee
+    unlockEmployee: async (employeeId, month) => {
+        const response = await api.post(`/payroll/employees/${employeeId}/unlock`, { month });
+        return response.data;
+    },
+
     // Update adjustments list for a payroll entry
     updateAdjustments: async (entryId, adjustments) => {
         const response = await api.put(`/payroll/entries/${entryId}/adjustments`, { adjustments });
+        return response.data;
+    },
+
+    // Fetch payroll audit trails
+    getAuditLogs: async (month, employeeId) => {
+        const params = {};
+        if (month) params.month = month;
+        if (employeeId) params.employeeId = employeeId;
+        const response = await api.get('/payroll/audit-logs', { params });
         return response.data;
     },
 

@@ -17,10 +17,12 @@ router.get('/dashboard', authorize('admin', 'hr'), payrollController.getPayrollD
 router.get('/dashboard/:employeeId', authorize('admin', 'hr'), payrollController.getEmployeeProjectedDetails);
 router.post('/finalize', authorize('admin', 'hr'), payrollController.finalizePayrollRun);
 router.post('/employees/:employeeId/finalize', authorize('admin', 'hr'), payrollController.finalizeEmployeePayroll);
+router.post('/employees/:employeeId/unlock', authorize('admin', 'hr'), payrollController.unlockEmployeePayroll);
 router.post('/employees/:employeeId/pay', authorize('admin', 'hr'), payrollController.payEmployeePayroll);
 router.get('/runs', authorize('admin', 'hr'), payrollController.getPayrollRuns);
 router.get('/runs/:runId', authorize('admin', 'hr'), payrollController.getPayrollRunDetails);
 router.post('/runs/:runId/mark-paid', authorize('admin', 'hr'), payrollController.markPayrollRunAsPaid);
+router.get('/audit-logs', authorize('admin', 'hr'), payrollController.getPayrollAuditLogs);
 
 // Payslip PDF Stream API (accessible by employees for their own, or admin/hr)
 router.put('/entries/:entryId/adjustments', authorize('admin', 'hr'), payrollController.updateEntryAdjustments);

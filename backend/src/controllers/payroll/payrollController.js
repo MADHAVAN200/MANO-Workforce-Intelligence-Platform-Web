@@ -390,6 +390,24 @@ export const finalizeEmployeePayroll = catchAsync(async (req, res, next) => {
 
     const entry = await PayrollFinalizationService.finalizeEmployee(orgId, year, monthNum, employeeId, finalizedBy);
 
+    // Write audit log
+    try {
+        const empUser = await attendanceDB('users').where('user_id', employeeId).first();
+        const performer = await attendanceDB('users').where('user_id', finalizedBy).first();
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'LOCK',
+            employee_id: employeeId,
+            employee_name: empUser ? (empUser.user_name || empUser.email) : 'Employee',
+            month: month,
+            performed_by: finalizedBy,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: `Locked payroll. Net salary: ₹${entry.net_salary || 0}`
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed:', auditErr);
+    }
+
     res.status(200).json({
         status: 'success',
         message: 'Employee payroll locked successfully.',
@@ -412,6 +430,24 @@ export const payEmployeePayroll = catchAsync(async (req, res, next) => {
     const monthNum = Number(parts[1]);
 
     const entry = await PayrollFinalizationService.payEmployee(orgId, year, monthNum, employeeId, paidBy);
+
+    // Write audit log
+    try {
+        const empUser = await attendanceDB('users').where('user_id', employeeId).first();
+        const performer = await attendanceDB('users').where('user_id', paidBy).first();
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'PAY',
+            employee_id: employeeId,
+            employee_name: empUser ? (empUser.user_name || empUser.email) : 'Employee',
+            month: month,
+            performed_by: paidBy,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: `Disbursed and paid salary: ₹${entry.net_salary || 0}`
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed:', auditErr);
+    }
 
     res.status(200).json({
         status: 'success',
@@ -488,6 +524,25 @@ export const updateEntryAdjustments = catchAsync(async (req, res, next) => {
             updated_at: attendanceDB.fn.now()
         });
 
+    // Write audit log
+    try {
+        const empUser = await attendanceDB('users').where('user_id', entry.employee_id).first();
+        const performer = await attendanceDB('users').where('user_id', req.user.id).first();
+        const run = await attendanceDB('payroll_runs').where('run_id', entry.run_id).first();
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'ADJUSTMENT_UPDATE',
+            employee_id: entry.employee_id,
+            employee_name: empUser ? (empUser.user_name || empUser.email) : 'Employee',
+            month: run ? `${run.year}-${String(run.month).padStart(2, '0')}` : '2026-06',
+            performed_by: req.user.id,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: `Updated manual adjustments. Additions: +₹${additionsSum}, Deductions: -₹${deductionsSum}. Net: ₹${finalNetSalary}`
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed:', auditErr);
+    }
+
     const updatedEntry = await attendanceDB('payroll_entries').where({ entry_id: entryId }).first();
 
     res.status(200).json({
@@ -520,6 +575,24 @@ export const createPackageGroup = catchAsync(async (req, res, next) => {
         overtimeRate,
         effectiveFrom
     });
+
+    // Write audit log
+    try {
+        const performer = await attendanceDB('users').where('user_id', req.user.id).first();
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'PACKAGE_CREATE',
+            employee_id: null,
+            employee_name: null,
+            month: effectiveFrom ? effectiveFrom.substring(0, 7) : null,
+            performed_by: req.user.id,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: `Created package group "${packageName}" with gross salary ₹${Number(grossSalary).toLocaleString()} and overtime ${overtimeEnabled ? `enabled at ₹${overtimeRate}/hr` : 'disabled'}.`
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed for package creation:', auditErr);
+    }
+
     res.status(201).json({
         status: 'success',
         data: newGroup
@@ -547,6 +620,25 @@ export const createPackageRevision = catchAsync(async (req, res, next) => {
         overtimeRate,
         effectiveFrom
     });
+
+    // Write audit log
+    try {
+        const pGroup = await attendanceDB('payroll_package_groups').where('package_group_id', packageGroupId).first();
+        const performer = await attendanceDB('users').where('user_id', req.user.id).first();
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'PACKAGE_REVISION_CREATE',
+            employee_id: null,
+            employee_name: null,
+            month: effectiveFrom ? effectiveFrom.substring(0, 7) : null,
+            performed_by: req.user.id,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: `Added new rate revision for package "${pGroup ? pGroup.package_name : packageGroupId}" starting ${effectiveFrom}: Gross Salary ₹${Number(grossSalary).toLocaleString()}, Overtime ${overtimeEnabled ? `enabled at ₹${overtimeRate}/hr` : 'disabled'}.`
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed for package revision:', auditErr);
+    }
+
     res.status(201).json({
         status: 'success',
         data: newRevision
@@ -561,6 +653,27 @@ export const updatePackageGroup = catchAsync(async (req, res, next) => {
         packageName,
         isActive
     });
+
+    // Write audit log
+    try {
+        const performer = await attendanceDB('users').where('user_id', req.user.id).first();
+        const updatedFields = [];
+        if (packageName !== undefined) updatedFields.push(`name to "${packageName}"`);
+        if (isActive !== undefined) updatedFields.push(`status to ${isActive ? 'Active' : 'Inactive'}`);
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'PACKAGE_UPDATE',
+            employee_id: null,
+            employee_name: null,
+            month: new Date().toISOString().substring(0, 7),
+            performed_by: req.user.id,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: `Updated package group (ID: ${packageGroupId}): ${updatedFields.join(', ')}.`
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed for package update:', auditErr);
+    }
+
     res.status(200).json({
         status: 'success',
         data: updated
@@ -571,6 +684,24 @@ export const deletePackageGroup = catchAsync(async (req, res, next) => {
     const orgId = req.user.org_id;
     const { packageGroupId } = req.params;
     await PackageService.deletePackageGroup(Number(packageGroupId), orgId);
+
+    // Write audit log
+    try {
+        const performer = await attendanceDB('users').where('user_id', req.user.id).first();
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'PACKAGE_DELETE',
+            employee_id: null,
+            employee_name: null,
+            month: new Date().toISOString().substring(0, 7),
+            performed_by: req.user.id,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: `Deleted package group (ID: ${packageGroupId}).`
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed for package delete:', auditErr);
+    }
+
     res.status(200).json({
         status: 'success',
         message: 'Package group deleted successfully.'
@@ -600,6 +731,25 @@ export const assignPackageToEmployee = catchAsync(async (req, res, next) => {
         createdBy
     });
 
+    // Write audit log
+    try {
+        const empUser = await attendanceDB('users').where('user_id', employeeId).first();
+        const performer = await attendanceDB('users').where('user_id', req.user.id).first();
+        const pGroup = await attendanceDB('payroll_package_groups').where('package_group_id', packageGroupId).first();
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'PACKAGE_ASSIGN',
+            employee_id: Number(employeeId),
+            employee_name: empUser ? (empUser.user_name || empUser.email) : 'Employee',
+            month: effectiveFrom ? effectiveFrom.substring(0, 7) : new Date().toISOString().substring(0, 7),
+            performed_by: req.user.id,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: `Assigned salary package "${pGroup ? pGroup.package_name : packageGroupId}" to employee ${empUser ? (empUser.user_name || empUser.email) : employeeId} effective from ${effectiveFrom}.`
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed for package assignment:', auditErr);
+    }
+
     res.status(200).json({
         status: 'success',
         message: 'Package assigned successfully.',
@@ -622,6 +772,24 @@ export const unassignPackageFromEmployee = catchAsync(async (req, res, next) => 
         effectiveFrom,
         createdBy
     });
+
+    // Write audit log
+    try {
+        const empUser = await attendanceDB('users').where('user_id', employeeId).first();
+        const performer = await attendanceDB('users').where('user_id', req.user.id).first();
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'PACKAGE_UNASSIGN',
+            employee_id: Number(employeeId),
+            employee_name: empUser ? (empUser.user_name || empUser.email) : 'Employee',
+            month: effectiveFrom ? effectiveFrom.substring(0, 7) : new Date().toISOString().substring(0, 7),
+            performed_by: req.user.id,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: `Unassigned salary package from employee ${empUser ? (empUser.user_name || empUser.email) : employeeId} and configured custom salary of ₹${Number(grossMonthlySalary).toLocaleString()}${overtimeEnabled ? ` with overtime at ₹${overtimeRate}/hr` : ' (no overtime)'} effective from ${effectiveFrom}.`
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed for package unassignment:', auditErr);
+    }
 
     res.status(200).json({
         status: 'success',
@@ -695,6 +863,82 @@ export const updatePayrollSettings = catchAsync(async (req, res, next) => {
         status: 'success',
         message: 'Payroll settings updated successfully.',
         data: updatedSettings
+    });
+});
+
+export const unlockEmployeePayroll = catchAsync(async (req, res, next) => {
+    const orgId = req.user.org_id;
+    const employeeId = Number(req.params.employeeId);
+    const { month } = req.body; // YYYY-MM
+
+    if (!month) {
+        return next(new AppError('Month parameter is required (format: YYYY-MM).', 400));
+    }
+
+    const parts = month.split('-');
+    const year = Number(parts[0]);
+    const monthNum = Number(parts[1]);
+
+    const run = await attendanceDB('payroll_runs')
+        .where({ org_id: orgId, year, month: monthNum })
+        .first();
+
+    if (!run) {
+        return next(new AppError('No payroll run found for this period.', 404));
+    }
+
+    if (run.status !== 'Live') {
+        return next(new AppError(`Cannot unlock employee payroll. The entire payroll run is already ${run.status.toLowerCase()}.`, 400));
+    }
+
+    await attendanceDB('payroll_entries')
+        .where({ run_id: run.run_id, employee_id: employeeId })
+        .update({ status: 'Draft', updated_at: attendanceDB.fn.now() });
+
+    // Write audit log
+    try {
+        const empUser = await attendanceDB('users').where('user_id', employeeId).first();
+        const performer = await attendanceDB('users').where('user_id', req.user.id).first();
+        await attendanceDB('payroll_audit_logs').insert({
+            org_id: orgId,
+            action: 'UNLOCK',
+            employee_id: employeeId,
+            employee_name: empUser ? (empUser.user_name || empUser.email) : 'Employee',
+            month: month,
+            performed_by: req.user.id,
+            performed_by_name: performer ? (performer.user_name || performer.email) : 'Admin',
+            details: 'Unlocked employee monthly payroll, reverting status to Draft.'
+        });
+    } catch (auditErr) {
+        console.error('Audit logger failed:', auditErr);
+    }
+
+    res.status(200).json({
+        status: 'success',
+        message: 'Employee payroll unlocked successfully.'
+    });
+});
+
+export const getPayrollAuditLogs = catchAsync(async (req, res, next) => {
+    const orgId = req.user.org_id;
+    const { month, employeeId } = req.query;
+
+    let query = attendanceDB('payroll_audit_logs')
+        .where('org_id', orgId)
+        .orderBy('created_at', 'desc');
+
+    if (month) {
+        query = query.where('month', month);
+    }
+    if (employeeId) {
+        query = query.where('employee_id', Number(employeeId));
+    }
+
+    const logs = await query.limit(100);
+
+    res.status(200).json({
+        status: 'success',
+        data: logs
     });
 });
 

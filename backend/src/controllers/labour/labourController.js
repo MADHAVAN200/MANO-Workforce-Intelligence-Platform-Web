@@ -151,7 +151,7 @@ export const getAllLabours = catchAsync(async (req, res) => {
 });
 
 export const createLabour = catchAsync(async (req, res) => {
-    const { name, phone, sex, role, wage_type, monthly_salary, allowed_leaves, site_id } = req.body;
+    const { name, phone, sex, role, wage_type, monthly_salary, allowed_leaves, site_id, overtime_pay_per_hour } = req.body;
 
     if (!name || !role || monthly_salary === undefined) {
         throw new AppError('Name, role and monthly salary are required', 400);
@@ -171,10 +171,11 @@ export const createLabour = catchAsync(async (req, res) => {
         phone: phone || null,
         sex,
         role,
-        wage_type: wage_type || 'Daily Wage',
+        wage_type: 'Daily Wage',
         monthly_salary: Number(monthly_salary),
         allowed_leaves: Number(allowed_leaves) || 0,
         site_id: site_id || null,
+        overtime_pay_per_hour: Number(overtime_pay_per_hour) || 0,
         status: 'Active'
     });
 
@@ -194,7 +195,7 @@ export const createLabour = catchAsync(async (req, res) => {
 
 export const updateLabour = catchAsync(async (req, res) => {
     const { id } = req.params;
-    const { name, phone, sex, role, wage_type, monthly_salary, allowed_leaves, site_id, status } = req.body;
+    const { name, phone, sex, role, wage_type, monthly_salary, allowed_leaves, site_id, status, overtime_pay_per_hour } = req.body;
 
     if (phone) {
         const existing = await attendanceDB('labours')
@@ -213,10 +214,11 @@ export const updateLabour = catchAsync(async (req, res) => {
             phone: phone || null,
             sex,
             role,
-            wage_type,
+            wage_type: 'Daily Wage',
             monthly_salary: monthly_salary !== undefined ? Number(monthly_salary) : undefined,
             allowed_leaves: allowed_leaves !== undefined ? Number(allowed_leaves) : undefined,
             site_id: site_id || null,
+            overtime_pay_per_hour: overtime_pay_per_hour !== undefined ? Number(overtime_pay_per_hour) : undefined,
             status,
             updated_at: attendanceDB.fn.now()
         });
@@ -301,9 +303,9 @@ export const getSiteAttendance = catchAsync(async (req, res) => {
                 });
             });
         })
-        .select('l.labour_id', 'l.name', 'l.role', 'l.wage_type', 'l.site_id as primary_site_id')
+        .select('l.labour_id', 'l.name', 'l.role', 'l.wage_type', 'l.site_id as primary_site_id', 'l.overtime_pay_per_hour')
         .count('a.attendance_id as frequent_count')
-        .groupBy('l.labour_id', 'l.name', 'l.role', 'l.wage_type', 'l.site_id')
+        .groupBy('l.labour_id', 'l.name', 'l.role', 'l.wage_type', 'l.site_id', 'l.overtime_pay_per_hour')
         .orderBy('frequent_count', 'desc')
         .orderBy('l.name', 'asc');
 
@@ -317,13 +319,15 @@ export const getSiteAttendance = catchAsync(async (req, res) => {
     const attendanceRecords = await attendanceDB('labour_attendance as a')
         .leftJoin('labour_sites as s', 'a.site_id', 's.site_id')
         .where({ 'a.date': date })
-        .select('a.labour_id', 'a.status', 'a.attendance_id', 'a.site_id', 's.site_name');
+        .select('a.labour_id', 'a.status', 'a.attendance_id', 'a.site_id', 's.site_name', 'a.overtime_hours');
 
     // Filter attendance records to find extra (borrowed/marked) labours on this date at this specific site
     const currentSiteAttendance = attendanceRecords.filter(rec => Number(rec.site_id) === Number(site_id));
     const attendanceMap = {};
+    const attendanceOvertimeMap = {};
     currentSiteAttendance.forEach(rec => {
         attendanceMap[rec.labour_id] = rec.status;
+        attendanceOvertimeMap[rec.labour_id] = rec.overtime_hours;
     });
 
     // Create maps of attendance at other sites
@@ -346,7 +350,7 @@ export const getSiteAttendance = catchAsync(async (req, res) => {
     if (extraLabourIds.length > 0) {
         extraLabours = await attendanceDB('labours')
             .whereIn('labour_id', extraLabourIds)
-            .select('labour_id', 'name', 'role', 'wage_type', 'site_id as primary_site_id');
+            .select('labour_id', 'name', 'role', 'wage_type', 'site_id as primary_site_id', 'overtime_pay_per_hour');
     }
 
     const allLabours = [...labours, ...extraLabours];
@@ -373,7 +377,9 @@ export const getSiteAttendance = catchAsync(async (req, res) => {
         is_borrowed: !associatedIds.has(lab.labour_id),
         frequent_count: Number(lab.frequent_count || 0),
         already_marked_at: otherSitesAttendanceMap[lab.labour_id] || null,
-        is_scheduled_multi_site: (scheduleCountMap[lab.labour_id] || 0) >= 2
+        is_scheduled_multi_site: (scheduleCountMap[lab.labour_id] || 0) >= 2,
+        overtime_pay_per_hour: Number(lab.overtime_pay_per_hour || 0),
+        overtime_hours: Number(attendanceOvertimeMap[lab.labour_id] || 0)
     }));
 
     res.json({
@@ -451,6 +457,7 @@ export const saveSiteAttendance = catchAsync(async (req, res) => {
                     site_id: Number(site_id),
                     date,
                     status: r.status || '',
+                    overtime_hours: Number(r.overtime_hours || 0),
                     marked_by
                 });
             }
@@ -497,7 +504,7 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
         .leftJoin('labour_site_relations as r', 'l.labour_id', 'r.labour_id')
         .leftJoin('labour_sites as s', 'r.site_id', 's.site_id')
         .select(
-            'l.labour_id', 'l.name', 'l.role', 'l.wage_type', 'l.monthly_salary', 'l.allowed_leaves', 'l.site_id as primary_site_id',
+            'l.labour_id', 'l.name', 'l.role', 'l.wage_type', 'l.monthly_salary', 'l.allowed_leaves', 'l.site_id as primary_site_id', 'l.overtime_pay_per_hour',
             attendanceDB.raw('GROUP_CONCAT(s.site_id SEPARATOR ",") as site_ids'),
             attendanceDB.raw('GROUP_CONCAT(s.site_name SEPARATOR ", ") as site_names')
         )
@@ -506,7 +513,7 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
             this.where('l.site_id', Number(site_id))
                 .orWhere('r.site_id', Number(site_id));
         })
-        .groupBy('l.labour_id');
+        .groupBy('l.labour_id', 'l.name', 'l.role', 'l.wage_type', 'l.monthly_salary', 'l.allowed_leaves', 'l.site_id', 'l.overtime_pay_per_hour');
 
     if (labours.length === 0) {
         return res.json({
@@ -520,7 +527,7 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
     // 2. Fetch all attendance records for these labours across ALL sites
     const attendanceRecords = await attendanceDB('labour_attendance')
         .whereIn('labour_id', labourIds)
-        .select('labour_id', 'status', 'date', 'site_id');
+        .select('labour_id', 'status', 'date', 'site_id', 'overtime_hours');
 
     // Fetch daily schedules for these labours to calculate divisors
     const dailySchedules = await attendanceDB('labour_daily_schedule')
@@ -539,6 +546,11 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
         scheduleCountMap[sch.labour_id][dateStr] += 1;
     });
 
+    const overtimePayMap = {};
+    labours.forEach(l => {
+        overtimePayMap[l.labour_id] = Number(l.overtime_pay_per_hour || 0);
+    });
+
     // Group attendance by labour and month (to calculate correct monthly-based wage rates if Fixed Salary)
     const attendanceMap = {};
     labourIds.forEach(id => {
@@ -551,7 +563,7 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
             const dateStr = new Date(rec.date).toISOString().split('T')[0];
             const monthKey = dateStr.slice(0, 7); // YYYY-MM
             if (!counts[monthKey]) {
-                counts[monthKey] = { Present: 0, Absent: 0, HalfDay: 0, PaidLeave: 0, weightSum: 0 };
+                counts[monthKey] = { Present: 0, Absent: 0, HalfDay: 0, PaidLeave: 0, weightSum: 0, overtimeCreditSum: 0 };
             }
             const isCurrentSite = Number(rec.site_id) === Number(site_id);
             if (isCurrentSite) {
@@ -569,6 +581,10 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
                     w = 0.5 / S;
                 }
                 counts[monthKey].weightSum += w;
+
+                // Accumulate overtime pay
+                const otRate = overtimePayMap[rec.labour_id] || 0;
+                counts[monthKey].overtimeCreditSum += Number(rec.overtime_hours || 0) * otRate;
             }
         }
     });
@@ -632,8 +648,8 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
                 ? monthlySalary
                 : (monthlySalary / totalDays);
 
-            // Dynamic credit calculation using weight sum
-            accruedCredit += counts.weightSum * dailyRate;
+            // Dynamic credit calculation using weight sum + overtime pay
+            accruedCredit += counts.weightSum * dailyRate + (counts.overtimeCreditSum || 0);
         });
 
         accruedCredit = Math.round(accruedCredit);
@@ -661,6 +677,7 @@ export const getFinancesSummary = catchAsync(async (req, res) => {
             net_earned: netEarned,         // Accrued to Pay (Site-specific)
             advances_taken: totalAdvances, // Advances Taken (Site-specific)
             net_payable: netPayable,       // Final Net Payable (Site-specific)
+            overtime_pay_per_hour: Number(lab.overtime_pay_per_hour || 0),
             payout: payouts.find(p => p.labour_id === lab.labour_id) || null // For backwards compat
         };
     });
@@ -703,7 +720,7 @@ async function getLabourBalancesPerSite(labour_id) {
     // Fetch all attendance for this worker
     const attendance = await attendanceDB('labour_attendance')
         .where('labour_id', labour_id)
-        .select('status', 'date', 'site_id');
+        .select('status', 'date', 'site_id', 'overtime_hours');
 
     // Fetch daily schedules for this worker
     const dailySchedules = await attendanceDB('labour_daily_schedule')
@@ -728,7 +745,7 @@ async function getLabourBalancesPerSite(labour_id) {
         const dateStr = new Date(rec.date).toISOString().split('T')[0];
         const monthKey = dateStr.slice(0, 7);
         if (!siteAttendance[sId][monthKey]) {
-            siteAttendance[sId][monthKey] = { Present: 0, Absent: 0, HalfDay: 0, PaidLeave: 0, weightSum: 0 };
+            siteAttendance[sId][monthKey] = { Present: 0, Absent: 0, HalfDay: 0, PaidLeave: 0, weightSum: 0, overtimeCreditSum: 0 };
         }
         if (rec.status === 'Present') siteAttendance[sId][monthKey].Present += 1;
         else if (rec.status === 'Absent') siteAttendance[sId][monthKey].Absent += 1;
@@ -744,6 +761,10 @@ async function getLabourBalancesPerSite(labour_id) {
             w = 0.5 / S;
         }
         siteAttendance[sId][monthKey].weightSum += w;
+
+        // Accumulate overtime pay
+        const otRate = Number(worker.overtime_pay_per_hour || 0);
+        siteAttendance[sId][monthKey].overtimeCreditSum += Number(rec.overtime_hours || 0) * otRate;
     });
 
     // Fetch all advances
@@ -791,8 +812,8 @@ async function getLabourBalancesPerSite(labour_id) {
                 ? monthlySalary
                 : (monthlySalary / totalDays);
 
-            // Dynamic credit calculation using weight sum
-            accruedCredit += counts.weightSum * dailyRate;
+            // Dynamic credit calculation using weight sum + overtime pay
+            accruedCredit += counts.weightSum * dailyRate + (counts.overtimeCreditSum || 0);
         });
 
         accruedCredit = Math.round(accruedCredit);
@@ -976,7 +997,7 @@ export const bulkCreateLabours = catchAsync(async (req, res) => {
     const phonesInBatch = new Set();
 
     const insertData = labours.map(lab => {
-        const { name, phone, sex, role, wage_type, monthly_salary, allowed_leaves, site_id, site_name } = lab;
+        const { name, phone, sex, role, wage_type, monthly_salary, allowed_leaves, site_id, site_name, overtime_pay_per_hour } = lab;
 
         if (!name || !role || monthly_salary === undefined) {
             throw new AppError('Name, role and monthly salary are required for all workers', 400);
@@ -1002,10 +1023,11 @@ export const bulkCreateLabours = catchAsync(async (req, res) => {
             phone: cleanPhone,
             sex: sex || 'Male',
             role,
-            wage_type: wage_type || 'Daily Wage',
+            wage_type: 'Daily Wage',
             monthly_salary: Number(monthly_salary),
             allowed_leaves: Number(allowed_leaves) || 0,
             site_id: resolvedSiteId,
+            overtime_pay_per_hour: Number(overtime_pay_per_hour) || 0,
             status: 'Active',
             created_at: attendanceDB.fn.now(),
             updated_at: attendanceDB.fn.now()
@@ -1263,8 +1285,8 @@ export const downloadBulkTemplate = catchAsync(async (req, res) => {
         { header: 'Phone', key: 'phone', width: 15 },
         { header: 'Sex', key: 'sex', width: 10 },
         { header: 'Role', key: 'role', width: 15 },
-        { header: 'Wage Type', key: 'wage_type', width: 15 },
-        { header: 'Monthly Salary', key: 'monthly_salary', width: 18 },
+        { header: 'Daily Wage', key: 'monthly_salary', width: 18 },
+        { header: 'Overtime Pay Per Hour', key: 'overtime_pay_per_hour', width: 22 },
         { header: 'Site Name', key: 'site_name', width: 20 }
     ];
 
@@ -1283,8 +1305,8 @@ export const downloadBulkTemplate = catchAsync(async (req, res) => {
         phone: '9876543210',
         sex: 'Male',
         role: 'Mason',
-        wage_type: 'Daily Wage',
-        monthly_salary: 15000,
+        monthly_salary: 600,
+        overtime_pay_per_hour: 100,
         site_name: ''
     });
 
@@ -1297,11 +1319,6 @@ export const downloadBulkTemplate = catchAsync(async (req, res) => {
             type: 'list',
             allowBlank: true,
             formulae: ['"Male,Female,Other"']
-        };
-        worksheet.getCell(`E${i}`).dataValidation = {
-            type: 'list',
-            allowBlank: true,
-            formulae: ['"Daily Wage"']
         };
         
         if (sites.length > 0) {
@@ -1355,10 +1372,11 @@ export const parseBulkLabours = catchAsync(async (req, res) => {
 
     const nameCol = headerMap['name'];
     const roleCol = headerMap['role'];
-    const salaryCol = headerMap['monthly salary'] || headerMap['salary'];
+    const salaryCol = headerMap['daily wage'] || headerMap['daily_wage'] || headerMap['monthly salary'] || headerMap['salary'];
+    const otPayCol = headerMap['overtime pay per hour'] || headerMap['overtime_pay_per_hour'] || headerMap['overtime pay'] || headerMap['overtime_pay'];
 
     if (!nameCol || !roleCol || !salaryCol) {
-        throw new AppError('Missing required columns: Name, Role, and Monthly Salary must be defined in the header row.', 400);
+        throw new AppError('Missing required columns: Name, Role, and Daily Wage (or Monthly Salary) must be defined in the header row.', 400);
     }
 
     const getVal = (row, colIndex) => {
@@ -1392,7 +1410,6 @@ export const parseBulkLabours = catchAsync(async (req, res) => {
 
     const sexCol = headerMap['sex'] || headerMap['gender'];
     const phoneCol = headerMap['phone'] || headerMap['mobile'];
-    const wageTypeCol = headerMap['wage type'] || headerMap['wage_type'];
     const siteNameCol = headerMap['site name'] || headerMap['site_name'];
 
     const parsed = [];
@@ -1407,7 +1424,8 @@ export const parseBulkLabours = catchAsync(async (req, res) => {
         const monthly_salary = salaryVal ? Number(salaryVal) : NaN;
         const sex = sexCol ? (getVal(row, sexCol) || 'Male') : 'Male';
         const phone = phoneCol ? getVal(row, phoneCol) : '';
-        const wage_type = wageTypeCol ? (getVal(row, wageTypeCol) || 'Daily Wage') : 'Daily Wage';
+        const otPayVal = otPayCol ? getVal(row, otPayCol) : '';
+        const overtime_pay_per_hour = otPayVal ? Number(otPayVal) : 0;
         const site_name = siteNameCol ? getVal(row, siteNameCol) : '';
 
         let isValid = true;
@@ -1423,7 +1441,7 @@ export const parseBulkLabours = catchAsync(async (req, res) => {
         }
         if (isNaN(monthly_salary)) {
             isValid = false;
-            error += 'Valid Monthly Salary is required. ';
+            error += 'Valid Daily Wage is required. ';
         }
 
         const cleanPhone = phone ? phone.trim() : '';
@@ -1451,8 +1469,9 @@ export const parseBulkLabours = catchAsync(async (req, res) => {
             phone: cleanPhone,
             sex,
             role,
-            wage_type,
+            wage_type: 'Daily Wage',
             monthly_salary: isNaN(monthly_salary) ? '' : monthly_salary,
+            overtime_pay_per_hour: isNaN(overtime_pay_per_hour) ? 0 : overtime_pay_per_hour,
             site_id,
             site_name,
             isValid,

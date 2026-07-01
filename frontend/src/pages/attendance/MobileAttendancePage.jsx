@@ -283,6 +283,7 @@ const MobileAttendancePage = () => {
     const [reportsCustomEndDate, setReportsCustomEndDate] = useState(new Date().toISOString().slice(0, 10));
     const [reportsSelectedWeek, setReportsSelectedWeek] = useState('');
     const [reportsExportColumns, setReportsExportColumns] = useState({
+        shift: true,
         timeIn: true,
         timeOut: true,
         workedHours: true,
@@ -1363,9 +1364,6 @@ const MobileAttendancePage = () => {
                                                 </p>
                                             </div>
                                         </div>
-                                        <div className="w-8 h-8 rounded-xl bg-slate-50 dark:bg-white/5 flex items-center justify-center">
-                                            <ChevronRight size={16} className={hasActiveSession ? 'text-slate-200 dark:text-slate-700' : 'text-slate-400 dark:text-slate-500'} />
-                                        </div>
                                     </button>
 
                                     <button
@@ -1393,9 +1391,6 @@ const MobileAttendancePage = () => {
                                                     {!hasActiveSession ? 'No active session' : 'End your day'}
                                                 </p>
                                             </div>
-                                        </div>
-                                        <div className="w-8 h-8 rounded-xl bg-slate-50 dark:bg-white/5 flex items-center justify-center">
-                                            <ChevronRight size={16} className={!hasActiveSession ? 'text-slate-200 dark:text-slate-700' : 'text-slate-400 dark:text-slate-500'} />
                                         </div>
                                     </button>
                                 </div>
@@ -1519,17 +1514,17 @@ const MobileAttendancePage = () => {
                                                             </div>
                                                         </div>
                                                         {s.time_in_image ? (
-                                                            <button 
+                                                            <div 
                                                                 onClick={() => setPreviewImage(s.time_in_image)}
-                                                                className="w-full aspect-square rounded-2xl overflow-hidden border border-slate-100 dark:border-github-dark-border relative group active:scale-95 transition-all shadow-inner"
+                                                                className="w-full flex justify-center cursor-pointer relative group active:scale-95 transition-all"
                                                             >
-                                                                <img src={s.time_in_image} alt="In" className="w-full h-full object-contain" />
-                                                                <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                                                                <img src={s.time_in_image} alt="In" className="w-auto h-auto max-h-56 max-w-full block rounded-2xl shadow-md object-contain" />
+                                                                <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all rounded-2xl">
                                                                     <Eye size={20} className="text-white" />
                                                                 </div>
-                                                            </button>
+                                                            </div>
                                                         ) : (
-                                                            <div className="w-full aspect-square rounded-2xl bg-slate-50 dark:bg-github-dark-border/30 border border-dashed border-slate-200 dark:border-github-dark-border flex flex-col items-center justify-center text-slate-300">
+                                                            <div className="w-full h-32 rounded-2xl bg-slate-50 dark:bg-github-dark-border/30 border border-dashed border-slate-200 dark:border-github-dark-border flex flex-col items-center justify-center text-slate-300">
                                                                 <ImageIcon size={20} />
                                                                 <span className="text-[8px] font-bold mt-1 tracking-tighter">No Photo</span>
                                                             </div>
@@ -1548,17 +1543,17 @@ const MobileAttendancePage = () => {
                                                             </div>
                                                         </div>
                                                         {s.time_out_image ? (
-                                                            <button 
+                                                            <div 
                                                                 onClick={() => setPreviewImage(s.time_out_image)}
-                                                                className="w-full aspect-square rounded-2xl overflow-hidden border border-slate-100 dark:border-github-dark-border relative group active:scale-95 transition-all shadow-inner"
+                                                                className="w-full flex justify-center cursor-pointer relative group active:scale-95 transition-all"
                                                             >
-                                                                <img src={s.time_out_image} alt="Out" className="w-full h-full object-contain" />
-                                                                <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                                                                <img src={s.time_out_image} alt="Out" className="w-auto h-auto max-h-56 max-w-full block rounded-2xl shadow-md object-contain" />
+                                                                <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all rounded-2xl">
                                                                     <Eye size={20} className="text-white" />
                                                                 </div>
-                                                            </button>
+                                                            </div>
                                                         ) : (
-                                                            <div className="w-full aspect-square rounded-2xl bg-slate-50 dark:bg-github-dark-border/30 border border-dashed border-slate-200 dark:border-github-dark-border flex flex-col items-center justify-center text-slate-300">
+                                                            <div className="w-full h-32 rounded-2xl bg-slate-50 dark:bg-github-dark-border/30 border border-dashed border-slate-200 dark:border-github-dark-border flex flex-col items-center justify-center text-slate-300">
                                                                 <ImageIcon size={20} />
                                                                 <span className="text-[8px] font-bold mt-1 uppercase tracking-tighter">No Photo</span>
                                                             </div>
@@ -2094,6 +2089,7 @@ const MobileAttendancePage = () => {
                                                 {reportsIsColsDropdownOpen && (
                                                     <div className="absolute right-0 mt-1 w-full min-w-[240px] bg-white dark:bg-github-dark-subtle border border-slate-200 dark:border-github-dark-border rounded-2xl shadow-xl z-50 p-4 space-y-3">
                                                         {[
+                                                            { id: 'shift', label: 'Shift' },
                                                             { id: 'timeIn', label: 'Time In' },
                                                             { id: 'timeOut', label: 'Time Out' },
                                                             { id: 'workedHours', label: 'Worked Hours' },

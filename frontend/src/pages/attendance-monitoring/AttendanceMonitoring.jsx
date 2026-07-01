@@ -327,8 +327,8 @@ const MapSidebarContent = ({ selectedCluster, onClose }) => {
                                                     </span>
                                                 </div>
                                                 {selectedUser.session.inImage ? (
-                                                    <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-github-dark-border h-36 bg-slate-100 dark:bg-github-dark-subtle mt-2">
-                                                        <img src={selectedUser.session.inImage} className="w-full h-full object-contain" />
+                                                    <div className="flex justify-center w-full mt-2" onClick={() => setPreviewImage(selectedUser.session.inImage)}>
+                                                        <img src={selectedUser.session.inImage} alt="In Selfie" className="max-h-56 max-w-full w-auto block rounded-2xl shadow-md object-contain cursor-pointer transition-transform hover:scale-105" />
                                                     </div>
                                                 ) : (
                                                     <div className="flex flex-col items-center justify-center py-4 bg-slate-100/50 dark:bg-github-dark-subtle/10 rounded-xl border border-dashed border-slate-200 dark:border-github-dark-border mt-2">
@@ -348,8 +348,8 @@ const MapSidebarContent = ({ selectedCluster, onClose }) => {
                                                     </span>
                                                 </div>
                                                 {selectedUser.session.outImage ? (
-                                                    <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-github-dark-border h-36 bg-slate-100 dark:bg-github-dark-subtle mt-2">
-                                                        <img src={selectedUser.session.outImage} className="w-full h-full object-contain" />
+                                                    <div className="flex justify-center w-full mt-2" onClick={() => setPreviewImage(selectedUser.session.outImage)}>
+                                                        <img src={selectedUser.session.outImage} alt="Out Selfie" className="max-h-56 max-w-full w-auto block rounded-2xl shadow-md object-contain cursor-pointer transition-transform hover:scale-105" />
                                                     </div>
                                                 ) : (
                                                     <div className="flex flex-col items-center justify-center py-4 bg-slate-100/50 dark:bg-github-dark-subtle/10 rounded-xl border border-dashed border-slate-200 dark:border-github-dark-border mt-2">
@@ -379,8 +379,8 @@ const MapSidebarContent = ({ selectedCluster, onClose }) => {
                                                 </span>
                                             </div>
                                             { (selectedUser.type === 'in' ? selectedUser.session.inImage : selectedUser.session.outImage) ? (
-                                                <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-github-dark-border h-48 bg-slate-100 dark:bg-github-dark-subtle mt-2">
-                                                    <img src={selectedUser.type === 'in' ? selectedUser.session.inImage : selectedUser.session.outImage} className="w-full h-full object-contain" />
+                                                <div className="flex justify-center w-full mt-2" onClick={() => setPreviewImage(selectedUser.type === 'in' ? selectedUser.session.inImage : selectedUser.session.outImage)}>
+                                                    <img src={selectedUser.type === 'in' ? selectedUser.session.inImage : selectedUser.session.outImage} alt="Selfie" className="max-h-56 max-w-full w-auto block rounded-2xl shadow-md object-contain cursor-pointer transition-transform hover:scale-105" />
                                                 </div>
                                             ) : (
                                                 <div className="flex flex-col items-center justify-center py-6 bg-slate-100/50 dark:bg-github-dark-subtle/10 rounded-2xl border border-dashed border-slate-200 dark:border-github-dark-border mt-2">
@@ -757,6 +757,24 @@ const AttendanceMonitoring = () => {
     const [selectedDate, setSelectedDate] = React.useState(initialDate);
     const [lastSynced, setLastSynced] = React.useState(new Date());
 
+    const handlePrevDay = () => {
+        const current = new Date(selectedDate);
+        current.setDate(current.getDate() - 1);
+        const year = current.getFullYear();
+        const month = String(current.getMonth() + 1).padStart(2, '0');
+        const dayStr = String(current.getDate()).padStart(2, '0');
+        setSelectedDate(`${year}-${month}-${dayStr}`);
+    };
+
+    const handleNextDay = () => {
+        const current = new Date(selectedDate);
+        current.setDate(current.getDate() + 1);
+        const year = current.getFullYear();
+        const month = String(current.getMonth() + 1).padStart(2, '0');
+        const dayStr = String(current.getDate()).padStart(2, '0');
+        setSelectedDate(`${year}-${month}-${dayStr}`);
+    };
+
     const [departments, setDepartments] = useState([]);
     const [designations, setDesignations] = useState([]);
 
@@ -820,8 +838,8 @@ const AttendanceMonitoring = () => {
 
     // Data Fetching
     const fetchData = async (silent = false, forceRefresh = false) => {
-        const hasCache = !!attendanceCacheData.dailySummaryAdmin[selectedDate];
-        if (!silent && !hasCache) setLoading(true);
+        if (!silent) setLoading(true);
+        const startTime = Date.now();
         try {
             // 1. Fetch Dynamic Daily Summary for Admin
             const res = await attendanceService.getDailySummaryAdmin(selectedDate, forceRefresh);
@@ -846,7 +864,13 @@ const AttendanceMonitoring = () => {
         } catch (error) {
             console.error("Error fetching data:", error);
         } finally {
-            if (!silent) setLoading(false);
+            if (!silent) {
+                const elapsed = Date.now() - startTime;
+                const remaining = Math.max(0, 300 - elapsed);
+                setTimeout(() => setLoading(false), remaining);
+            } else {
+                setLoading(false);
+            }
             setLastSynced(new Date());
         }
     };
@@ -1294,7 +1318,7 @@ const AttendanceMonitoring = () => {
                 `}
             </style>
             <DashboardLayout title="Live Attendance" noPadding={true} tourPageKey={PAGE_KEY} tourSteps={tourSteps}>
-                <div className={`${(activeTab === 'requests' || (activeTab === 'live' && activeView === 'map')) ? 'h-[calc(100vh-64px)] overflow-hidden' : ''} p-4 flex flex-col space-y-4`}>
+                <div className={`${(activeTab === 'requests' || (activeTab === 'live' && activeView === 'map')) ? 'h-[calc(100vh-64px)] overflow-hidden' : ''} p-3 flex flex-col space-y-3`}>
                     {/* Tabs */}
                     <div data-tour-id="attendance-tabs" className="flex w-fit items-center gap-3 p-1.5 bg-[#f6f8fa] dark:bg-[#161b22] border border-[#d0d7de] dark:border-[#30363d] rounded-xl shrink-0">
                         <button
@@ -1354,7 +1378,7 @@ const AttendanceMonitoring = () => {
                             </div>
 
                             {/* Main Content */}
-                            <div className="flex-1 min-h-0 transition-colors duration-300 flex flex-col space-y-4">
+                            <div className={`${(activeTab === 'requests' || (activeTab === 'live' && activeView === 'map')) ? 'flex-1 min-h-0' : ''} transition-colors duration-300 flex flex-col space-y-4`}>
 
                                 {/* Premium Control Center */}
                                 <div data-tour-id="attendance-controls" className="p-6 bg-white dark:bg-dark-card rounded-lg shadow-sm border border-slate-200 dark:border-github-dark-border space-y-6 shrink-0">
@@ -1385,25 +1409,11 @@ const AttendanceMonitoring = () => {
                                             </p>
                                         </div>
 
-                                        <div className="flex items-center gap-3 bg-slate-50 dark:bg-github-dark-subtle/30 p-1.5 rounded-lg border border-slate-100 dark:border-github-dark-border">
-                                            <div className="flex items-center gap-3 w-64">
-                                                <DatePicker
-                                                    value={selectedDate}
-                                                    onChange={(date) => setSelectedDate(date)}
-                                                />
-                                            </div>
-                                            <button
-                                                onClick={() => fetchData(false, true)}
-                                                className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-white dark:hover:bg-dark-card rounded-md transition-all shadow-sm group"
-                                                title="Sync Data"
-                                            >
-                                                <RefreshCw size={16} className="group-active:rotate-180 transition-transform duration-500" />
-                                            </button>
                                         </div>
                                     </div>
 
-                                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-4 border-t border-slate-50 dark:border-github-dark-border/30">
-                                        <div className="flex items-center gap-4 flex-1">
+                                    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pt-4 border-t border-slate-50 dark:border-github-dark-border/30">
+                                        <div className="flex items-center gap-3 flex-1 flex-wrap">
                                             <div className="relative flex-1 max-w-md group">
                                                 <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
                                                 <input
@@ -1519,6 +1529,35 @@ const AttendanceMonitoring = () => {
                                                     )}
                                                 </AnimatePresence>
                                             </div>
+
+                                            {/* Date Navigation Filter Control */}
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    onClick={handlePrevDay}
+                                                    type="button"
+                                                    className="p-2 text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-lg transition-colors cursor-pointer"
+                                                    title="Previous Day"
+                                                >
+                                                    <ChevronLeft size={16} />
+                                                </button>
+
+                                                <div className="w-[230px]">
+                                                    <DatePicker
+                                                        value={selectedDate}
+                                                        onChange={(date) => setSelectedDate(date)}
+                                                        compact={true}
+                                                    />
+                                                </div>
+
+                                                <button
+                                                    onClick={handleNextDay}
+                                                    type="button"
+                                                    className="p-2 text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800/60 rounded-lg transition-colors cursor-pointer"
+                                                    title="Next Day"
+                                                >
+                                                    <ChevronRight size={16} />
+                                                </button>
+                                            </div>
                                         </div>
 
                                         {/* Uniform View Switcher */}
@@ -1550,7 +1589,7 @@ const AttendanceMonitoring = () => {
                                 </div>
 
 
-                                <div className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${activeView === 'map' ? 'flex flex-col' : ''}`}>
+                                <div className={`${(activeTab === 'requests' || (activeTab === 'live' && activeView === 'map')) ? 'flex-1 min-h-0 overflow-y-auto' : ''} custom-scrollbar ${activeView === 'map' ? 'flex flex-col' : ''}`}>
                                     {activeView === 'table' ? (
                                         <div data-tour-id="attendance-live-monitor" className="bg-white dark:bg-dark-card rounded-lg border border-slate-200 dark:border-github-dark-border shadow-sm overflow-hidden animate-in fade-in zoom-in-95 duration-500 min-h-[450px]">
                                             <div className="overflow-x-auto custom-scrollbar">
@@ -1659,11 +1698,11 @@ const AttendanceMonitoring = () => {
                                                                                                     <div className="space-y-2 flex flex-col items-center">
                                                                                                         <span className="text-[8px] font-bold text-emerald-400 uppercase tracking-wider block self-start">Punch In</span>
                                                                                                         {session.inImage ? (
-                                                                                                            <div className="w-24 h-24 rounded-lg overflow-hidden border border-slate-700 bg-black/40 flex items-center justify-center">
-                                                                                                                <img src={session.inImage} alt="In Selfie" className="max-h-full max-w-full object-contain" />
+                                                                                                            <div className="flex justify-center w-full my-1 cursor-pointer" onClick={() => setPreviewImage(session.inImage)}>
+                                                                                                                <img src={session.inImage} alt="In Selfie" className="max-h-32 max-w-full w-auto block rounded-xl shadow-sm object-contain hover:scale-105 transition-transform" />
                                                                                                             </div>
                                                                                                         ) : (
-                                                                                                            <div className="w-24 h-24 rounded-lg border border-dashed border-slate-700 flex flex-col items-center justify-center text-slate-500 text-[8px] gap-1 bg-black/10">
+                                                                                                            <div className="w-24 h-20 rounded-lg border border-dashed border-slate-700 flex flex-col items-center justify-center text-slate-500 text-[8px] gap-1 bg-black/10 my-1">
                                                                                                                 <Camera size={12} />
                                                                                                                 <span>No Selfie In</span>
                                                                                                             </div>
@@ -1678,11 +1717,11 @@ const AttendanceMonitoring = () => {
                                                                                                     <div className="space-y-2 flex flex-col items-center">
                                                                                                         <span className="text-[8px] font-bold text-rose-400 uppercase tracking-wider block self-start">Punch Out</span>
                                                                                                         {session.outImage ? (
-                                                                                                            <div className="w-24 h-24 rounded-lg overflow-hidden border border-slate-700 bg-black/40 flex items-center justify-center">
-                                                                                                                <img src={session.outImage} alt="Out Selfie" className="max-h-full max-w-full object-contain" />
+                                                                                                            <div className="flex justify-center w-full my-1 cursor-pointer" onClick={() => setPreviewImage(session.outImage)}>
+                                                                                                                <img src={session.outImage} alt="Out Selfie" className="max-h-32 max-w-full w-auto block rounded-xl shadow-sm object-contain hover:scale-105 transition-transform" />
                                                                                                             </div>
                                                                                                         ) : (
-                                                                                                            <div className="w-24 h-24 rounded-lg border border-dashed border-slate-700 flex flex-col items-center justify-center text-slate-500 text-[8px] gap-1 bg-black/10">
+                                                                                                            <div className="w-24 h-20 rounded-lg border border-dashed border-slate-700 flex flex-col items-center justify-center text-slate-500 text-[8px] gap-1 bg-black/10 my-1">
                                                                                                                 <Camera size={12} />
                                                                                                                 <span>{session.isActive ? 'Ongoing...' : 'No Selfie Out'}</span>
                                                                                                             </div>
@@ -1725,9 +1764,24 @@ const AttendanceMonitoring = () => {
                                         </div>
                                     ) : activeView === 'cards' ? (
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                            {loading && attendanceData.length === 0 ? (
-                                                <div className="col-span-full text-center py-20 text-slate-500 dark:text-github-dark-muted">
-                                                    <p>Loading live attendance data...</p>
+                                            {loading ? (
+                                                <div className="col-span-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-pulse">
+                                                    {Array.from({ length: 8 }).map((_, i) => (
+                                                        <div key={i} className="bg-white dark:bg-dark-card rounded-xl border border-slate-200 dark:border-github-dark-border/60 p-5 space-y-4">
+                                                            <div className="flex items-center gap-4">
+                                                                <div className="w-12 h-12 rounded-lg bg-slate-200 dark:bg-slate-700/60"></div>
+                                                                <div className="space-y-2 flex-1">
+                                                                    <div className="h-4 bg-slate-200 dark:bg-slate-700/60 rounded w-3/4"></div>
+                                                                    <div className="h-3 bg-slate-150 dark:bg-slate-800/80 rounded w-1/2"></div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="h-6 bg-slate-100 dark:bg-slate-800/80 rounded w-1/3"></div>
+                                                            <div className="grid grid-cols-2 gap-3 pt-2">
+                                                                <div className="h-10 bg-slate-100 dark:bg-slate-800/50 rounded-lg"></div>
+                                                                <div className="h-10 bg-slate-100 dark:bg-slate-800/50 rounded-lg"></div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             ) : filteredData.length > 0 ? (
                                                 filteredData.map((item, index) => {
@@ -2197,7 +2251,6 @@ const AttendanceMonitoring = () => {
                                         </div>
                                     ) : null}
                                 </div>
-                            </div>
                         </>
                     ) : (
                     // Approvals Tab Content
@@ -2454,7 +2507,7 @@ const AttendanceMonitoring = () => {
                                             let endHour = Math.min(24, Math.ceil((maxMin + 60) / 60));
                                             const span = Math.max(1, endHour - startHour);
                                             const timeToPos = (time) => { if (!time) return 0; const [h, m] = time.split(':').map(Number); const mins = (h || 0) * 60 + (m || 0); return Math.max(0, Math.min(100, ((mins - startHour * 60) / (span * 60)) * 100)); };
-                                            const getDurationPct = (s, e) => Math.max(0, timeToPos(e) - timeToPos(s));
+                                            const getDurationPct = (s, e) => Math.max(1.8, timeToPos(e) - timeToPos(s));
                                             const changesList = [];
                                             const origCopy = originalTasks.map(t => ({ ...t }));
                                             proposedTasks.forEach(prop => {
@@ -2505,14 +2558,20 @@ const AttendanceMonitoring = () => {
                                                         {/* Original row */}
                                                         <div className="mb-1">
                                                             <div className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Original</div>
-                                                            <div className="relative h-8 bg-slate-200/40 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-github-dark-border/50 overflow-hidden">
-                                                                {originalTasks.map(task => (
-                                                                    <div key={task.id}
-                                                                        className="absolute inset-y-1 rounded-md bg-slate-400/25 border border-slate-400/40 flex items-center justify-center overflow-hidden"
-                                                                        style={{ left: `${timeToPos(task.startTime)}%`, width: `${getDurationPct(task.startTime, task.endTime)}%` }}>
-                                                                        <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 px-1 truncate">{fmtTime(task.startTime)}–{fmtTime(task.endTime)}</span>
-                                                                    </div>
-                                                                ))}
+                                                            <div className="relative h-8 bg-slate-200/40 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-github-dark-border/50 overflow-hidden [isolation:isolate] flex items-center">
+                                                                {originalTasks.map(task => {
+                                                                    const leftPos = timeToPos(task.startTime);
+                                                                    const rawWidth = getDurationPct(task.startTime, task.endTime);
+                                                                    const maxW = Math.max(0, 100 - leftPos);
+                                                                    const widthPos = Math.min(rawWidth, maxW);
+                                                                    return (
+                                                                        <div key={task.id}
+                                                                            className="absolute top-1 bottom-1 rounded-md bg-slate-400/25 border border-slate-400/40 flex items-center justify-center overflow-hidden max-h-[24px] pointer-events-auto"
+                                                                            style={{ left: `${leftPos}%`, width: `${widthPos}%`, maxWidth: `${maxW}%`, minWidth: leftPos > 90 ? '10px' : '24px', boxSizing: 'border-box' }}>
+                                                                            <span className="text-[9px] font-mono text-slate-500 dark:text-slate-400 px-1 truncate whitespace-nowrap leading-none">{fmtTime(task.startTime)}–{fmtTime(task.endTime)}</span>
+                                                                        </div>
+                                                                    );
+                                                                })}
                                                                 {originalTasks.length === 0 && (
                                                                     <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">No Original Records</div>
                                                                 )}
@@ -2522,7 +2581,7 @@ const AttendanceMonitoring = () => {
                                                         {/* Proposed row */}
                                                         <div>
                                                             <div className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Proposed</div>
-                                                            <div className="relative h-8 bg-slate-200/40 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-github-dark-border/50 overflow-hidden">
+                                                            <div className="relative h-8 bg-slate-200/40 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-github-dark-border/50 overflow-hidden [isolation:isolate] flex items-center">
                                                                 {proposedTasks.map(task => {
                                                                     const isNew = changesList.some(c => c.type === 'ADD' && c.task.id === task.id);
                                                                     const isChanged = changesList.some(c => c.type === 'MODIFY' && c.task.id === task.id);
@@ -2531,12 +2590,16 @@ const AttendanceMonitoring = () => {
                                                                         : isChanged
                                                                         ? 'bg-amber-500/20 border-amber-500/50 text-amber-600 dark:text-amber-400'
                                                                         : 'bg-indigo-500/20 border-indigo-500/40 text-indigo-600 dark:text-indigo-400';
+                                                                    const leftPos = timeToPos(task.startTime);
+                                                                    const rawWidth = getDurationPct(task.startTime, task.endTime);
+                                                                    const maxW = Math.max(0, 100 - leftPos);
+                                                                    const widthPos = Math.min(rawWidth, maxW);
                                                                     return (
                                                                         <div key={task.id}
-                                                                            className={`absolute inset-y-1 rounded-md border flex items-center justify-center overflow-hidden ${cls}`}
-                                                                            style={{ left: `${timeToPos(task.startTime)}%`, width: `${getDurationPct(task.startTime, task.endTime)}%` }}>
+                                                                            className={`absolute top-1 bottom-1 rounded-md border flex items-center justify-center overflow-hidden max-h-[24px] pointer-events-auto ${cls}`}
+                                                                            style={{ left: `${leftPos}%`, width: `${widthPos}%`, maxWidth: `${maxW}%`, minWidth: leftPos > 90 ? '10px' : '24px', boxSizing: 'border-box' }}>
                                                                             {isNew && <div className="absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.8)]" />}
-                                                                            <span className="text-[10px] font-mono font-bold px-1 truncate">{fmtTime(task.startTime)}–{fmtTime(task.endTime)}</span>
+                                                                            <span className="text-[9px] font-mono font-bold px-1 truncate whitespace-nowrap leading-none">{fmtTime(task.startTime)}–{fmtTime(task.endTime)}</span>
                                                                         </div>
                                                                     );
                                                                 })}

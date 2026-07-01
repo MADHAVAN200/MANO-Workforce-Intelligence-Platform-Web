@@ -1781,8 +1781,8 @@ const MobileClusterDrawer = ({ selectedCluster, onClose, avatarTimestamp }) => {
                                                     </span>
                                                 </div>
                                                 {selectedUser.session.inImage ? (
-                                                    <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-github-dark-border h-36 bg-slate-100 dark:bg-github-dark-subtle mt-2">
-                                                        <img src={selectedUser.session.inImage} className="w-full h-full object-contain" />
+                                                    <div className="flex justify-center w-full mt-2" onClick={() => setPreviewImage(selectedUser.session.inImage)}>
+                                                        <img src={selectedUser.session.inImage} alt="In Selfie" className="max-h-56 max-w-full w-auto block rounded-2xl shadow-md object-contain cursor-pointer active:scale-95 transition-transform" />
                                                     </div>
                                                 ) : (
                                                     <div className="flex flex-col items-center justify-center py-4 bg-slate-100/50 dark:bg-github-dark-subtle/10 rounded-xl border border-dashed border-slate-200 dark:border-github-dark-border mt-2">
@@ -1802,8 +1802,8 @@ const MobileClusterDrawer = ({ selectedCluster, onClose, avatarTimestamp }) => {
                                                     </span>
                                                 </div>
                                                 {selectedUser.session.outImage ? (
-                                                    <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-github-dark-border h-36 bg-slate-100 dark:bg-github-dark-subtle mt-2">
-                                                        <img src={selectedUser.session.outImage} className="w-full h-full object-contain" />
+                                                    <div className="flex justify-center w-full mt-2" onClick={() => setPreviewImage(selectedUser.session.outImage)}>
+                                                        <img src={selectedUser.session.outImage} alt="Out Selfie" className="max-h-56 max-w-full w-auto block rounded-2xl shadow-md object-contain cursor-pointer active:scale-95 transition-transform" />
                                                     </div>
                                                 ) : (
                                                     <div className="flex flex-col items-center justify-center py-4 bg-slate-100/50 dark:bg-github-dark-subtle/10 rounded-xl border border-dashed border-slate-200 dark:border-github-dark-border mt-2">
@@ -1833,8 +1833,8 @@ const MobileClusterDrawer = ({ selectedCluster, onClose, avatarTimestamp }) => {
                                                 </span>
                                             </div>
                                             { (selectedUser.type === 'in' ? selectedUser.session.inImage : selectedUser.session.outImage) ? (
-                                                <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-github-dark-border h-48 bg-slate-100 dark:bg-github-dark-subtle mt-2">
-                                                    <img src={selectedUser.type === 'in' ? selectedUser.session.inImage : selectedUser.session.outImage} className="w-full h-full object-contain" />
+                                                <div className="flex justify-center w-full mt-2" onClick={() => setPreviewImage(selectedUser.type === 'in' ? selectedUser.session.inImage : selectedUser.session.outImage)}>
+                                                    <img src={selectedUser.type === 'in' ? selectedUser.session.inImage : selectedUser.session.outImage} alt="Selfie" className="max-h-56 max-w-full w-auto block rounded-2xl shadow-md object-contain cursor-pointer active:scale-95 transition-transform" />
                                                 </div>
                                             ) : (
                                                 <div className="flex flex-col items-center justify-center py-6 bg-slate-100/50 dark:bg-github-dark-subtle/10 rounded-2xl border border-dashed border-slate-200 dark:border-github-dark-border mt-2">

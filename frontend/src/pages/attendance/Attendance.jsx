@@ -391,7 +391,7 @@ const Attendance = () => {
             
         attendanceService.getMyShiftPolicy()
             .then(data => {
-                if (data.ok) setMyShift(data.shift);
+                if (data.success || data.ok || data.shift) setMyShift(data.shift);
             })
             .catch(console.error);
     }, []);
@@ -510,6 +510,7 @@ const Attendance = () => {
     const [reportsCustomEndDate, setReportsCustomEndDate] = useState(new Date().toISOString().slice(0, 10));
     const [reportsSelectedWeek, setReportsSelectedWeek] = useState('');
     const [reportsExportColumns, setReportsExportColumns] = useState({
+        shift: true,
         timeIn: true,
         timeOut: true,
         workedHours: true,
@@ -535,15 +536,130 @@ const Attendance = () => {
     const [reportsPreviewData, setReportsPreviewData] = useState({ columns: [], rows: [] });
     const [reportsLoadingPreview, setReportsLoadingPreview] = useState(false);
 
+    const reportsSummary = useMemo(() => {
+        const summary = {
+            present: 0,
+            absent: 0,
+            leave: 0,
+            halfDay: 0,
+            overtime: 0,
+            hasData: false
+        };
+
+        if (!reportsPreviewData || !reportsPreviewData.rows || reportsPreviewData.rows.length === 0) {
+            return summary;
+        }
+
+        // 1. If we have cardRecords, we can calculate from daily records directly
+        if (reportsPreviewData.cardRecords && reportsPreviewData.cardRecords.length > 0) {
+            summary.hasData = true;
+            reportsPreviewData.cardRecords.forEach(record => {
+                const status = record.status || '';
+                const statusLower = status.toLowerCase();
+
+                if (status === 'Present' || statusLower.includes('present')) {
+                    summary.present += 1;
+                } else if (status === 'Absent' || statusLower.includes('absent')) {
+                    summary.absent += 1;
+                } else if (statusLower === 'on leave' || statusLower === 'leave') {
+                    summary.leave += 1;
+                } else if (statusLower === 'half day') {
+                    summary.halfDay += 1;
+                } else if (statusLower.includes('late') || statusLower.includes('overtime')) {
+                    summary.present += 1; // late/overtime counts as present
+                }
+
+                const otHrs = parseFloat(record.overtime_hours);
+                if (!isNaN(otHrs) && otHrs > 0) {
+                    summary.overtime += otHrs;
+                }
+            });
+            return summary;
+        }
+
+        // 2. Otherwise, parse spreadsheet columns
+        const columns = reportsPreviewData.columns || [];
+        const rows = reportsPreviewData.rows || [];
+
+        const dataRows = rows.filter(row => {
+            const firstCell = row[0]?.toString().toUpperCase();
+            return firstCell !== 'TOTALS' && firstCell !== 'TOTAL';
+        });
+
+        if (dataRows.length === 0) return summary;
+
+        // Find indices of relevant columns
+        const presentIdx = columns.findIndex(c => {
+            const cl = c?.toString().toLowerCase() || '';
+            return cl === 'present' || cl === 'present days';
+        });
+        const absentIdx = columns.findIndex(c => {
+            const cl = c?.toString().toLowerCase() || '';
+            return cl === 'absent' || cl === 'absent days';
+        });
+        const leaveIdx = columns.findIndex(c => {
+            const cl = c?.toString().toLowerCase() || '';
+            return cl === 'on leave' || cl === 'leave' || cl === 'leave days';
+        });
+        const halfDayIdx = columns.findIndex(c => {
+            const cl = c?.toString().toLowerCase() || '';
+            return cl === 'half day' || cl === 'half days';
+        });
+        const overtimeIdx = columns.findIndex(c => {
+            const cl = c?.toString().toLowerCase() || '';
+            return cl.includes('overtime') || cl === 'ot' || cl === 'ot hrs';
+        });
+        const statusIdx = columns.findIndex(c => (c?.toString().toLowerCase() || '') === 'status');
+
+        if (presentIdx !== -1 || absentIdx !== -1 || leaveIdx !== -1 || halfDayIdx !== -1 || overtimeIdx !== -1) {
+            summary.hasData = true;
+            dataRows.forEach(row => {
+                if (presentIdx !== -1) summary.present += parseInt(row[presentIdx]) || 0;
+                if (absentIdx !== -1) summary.absent += parseInt(row[absentIdx]) || 0;
+                if (leaveIdx !== -1) summary.leave += parseInt(row[leaveIdx]) || 0;
+                if (halfDayIdx !== -1) summary.halfDay += parseInt(row[halfDayIdx]) || 0;
+                if (overtimeIdx !== -1) summary.overtime += parseFloat(row[overtimeIdx]) || 0;
+            });
+        } else if (statusIdx !== -1) {
+            summary.hasData = true;
+            dataRows.forEach(row => {
+                const status = row[statusIdx]?.toString() || '';
+                const statusLower = status.toLowerCase();
+
+                if (status === 'Present' || statusLower.includes('present')) {
+                    summary.present += 1;
+                } else if (status === 'Absent' || statusLower.includes('absent')) {
+                    summary.absent += 1;
+                } else if (statusLower === 'on leave' || statusLower === 'leave') {
+                    summary.leave += 1;
+                } else if (statusLower === 'half day') {
+                    summary.halfDay += 1;
+                } else if (statusLower.includes('late') || statusLower.includes('overtime')) {
+                    summary.present += 1;
+                }
+            });
+        }
+
+        return summary;
+    }, [reportsPreviewData]);
+
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const tab = params.get('tab');
         const sTab = params.get('subTab');
+        const openDrawer = params.get('openDrawer');
+        const date = params.get('date');
         if (tab) {
             setActiveTab(tab);
         }
         if (sTab) {
             setSubTab(sTab);
+        }
+        if (openDrawer === 'true') {
+            setIsCorrectionDrawerOpen(true);
+        }
+        if (date) {
+            setCorrDate(date);
         }
     }, [window.location.search]);
 
@@ -1931,8 +2047,15 @@ const Attendance = () => {
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => { setActiveTab('my_attendance'); setSubTab('correction'); }}
-                                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap shadow-sm"
+                                    onClick={() => {
+                                        setActiveTab('my_attendance');
+                                        setSubTab('correction');
+                                        setIsCorrectionDrawerOpen(true);
+                                        if (missedPunchWarning && missedPunchWarning.dates && missedPunchWarning.dates.length > 0) {
+                                            setCorrDate(missedPunchWarning.dates[0]);
+                                        }
+                                    }}
+                                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap shadow-sm cursor-pointer"
                                 >
                                     Fix Now
                                 </button>
@@ -1940,14 +2063,7 @@ const Attendance = () => {
                         )}
 
                         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                            <div className="flex justify-end items-center gap-4 relative" ref={calendarRef}>
-                                <button
-                                    onClick={handlePrevDay}
-                                    className="p-2 rounded-xl bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border text-slate-500 hover:text-indigo-600 transition-all shadow-sm"
-                                >
-                                    <ChevronLeft size={20} />
-                                </button>
-
+                            <div className="flex justify-center items-center gap-4 relative" ref={calendarRef}>
                                 <div
                                     onClick={() => setShowCalendar(!showCalendar)}
                                     className="flex items-center justify-center gap-2 text-slate-600 dark:text-slate-300 font-medium bg-white dark:bg-dark-card py-2.5 px-6 rounded-xl shadow-sm border border-slate-200 dark:border-github-dark-border min-w-[200px] cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors select-none"
@@ -1956,21 +2072,21 @@ const Attendance = () => {
                                     <span>{formatDateDisplay(selectedDate)}</span>
                                 </div>
 
-                                    {showCalendar && (
-                                        <div className="absolute top-full right-0 mt-4 z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-                                            <CustomCalendar
-                                                selectedDate={selectedDate}
-                                                onChange={(date) => {
-                                                    setSelectedDate(date);
-                                                    setShowCalendar(false);
-                                                }}
-                                                onClose={() => setShowCalendar(false)}
-                                                events={calendarEvents}
-                                            />
-                                        </div>
-                                    )}
-                                </div>
+                                {showCalendar && (
+                                    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-4 z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                                        <CustomCalendar
+                                            selectedDate={selectedDate}
+                                            onChange={(date) => {
+                                                setSelectedDate(date);
+                                                setShowCalendar(false);
+                                            }}
+                                            onClose={() => setShowCalendar(false)}
+                                            events={calendarEvents}
+                                        />
+                                    </div>
+                                )}
                             </div>
+                        </div>
 
                             {/* Horizontal Date Scroller */}
                             <div className="flex gap-4 overflow-x-auto py-6 px-2 no-scrollbar scroll-smooth">
@@ -2655,7 +2771,7 @@ const Attendance = () => {
                                     <div 
                                         data-tour-id="att-correction-list"
                                         className="w-full lg:w-1/3 bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-200 dark:border-github-dark-border overflow-hidden flex flex-col lg:sticky lg:top-6" 
-                                        style={{ height: '650px' }}
+                                        style={{ height: 'calc(100vh - 120px)', minHeight: '650px' }}
                                     >
                                         <div className="p-4 border-b border-slate-200 dark:border-github-dark-border flex justify-between items-center">
                                             <h3 className="text-sm font-bold text-slate-800 dark:text-github-dark-text uppercase tracking-wider">My Requests</h3>
@@ -2716,8 +2832,10 @@ const Attendance = () => {
                                         </div>
                                     </div>
 
-                                    {/* RIGHT — Details Panel */}
-                                    <div className="w-full lg:w-2/3 bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-200 dark:border-github-dark-border flex flex-col min-h-[650px] h-fit">
+                                    <div 
+                                        className="w-full lg:w-2/3 bg-white dark:bg-dark-card rounded-xl shadow-sm border border-slate-200 dark:border-github-dark-border flex flex-col lg:sticky lg:top-6"
+                                        style={{ height: 'calc(100vh - 120px)', minHeight: '650px' }}
+                                    >
                                         {isFetchingDetails ? (
                                             <div className="flex-1 flex flex-col items-center justify-center p-12 text-slate-400">
                                                 <RefreshCw className="w-8 h-8 animate-spin text-indigo-500 mb-3" />
@@ -2753,8 +2871,7 @@ const Attendance = () => {
                                                     </span>
                                                 </div>
 
-                                                {/* Detail Body */}
-                                                <div className="flex-1">
+                                                <div className="flex-1 overflow-y-auto no-scrollbar">
 
                                                     {/* ── Visual Sync Timeline ── */}
                                                     {(() => {
@@ -3129,6 +3246,7 @@ const Attendance = () => {
                                             {reportsIsColsDropdownOpen && (
                                                 <div className="absolute right-0 mt-1 w-full min-w-[220px] bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border rounded-xl shadow-xl z-50 p-3 space-y-2.5">
                                                     {[
+                                                        { id: 'shift', label: 'Shift' },
                                                         { id: 'timeIn', label: 'Time In' },
                                                         { id: 'timeOut', label: 'Time Out' },
                                                         { id: 'workedHours', label: 'Worked Hours' },
@@ -3286,6 +3404,57 @@ const Attendance = () => {
                                                         </p>
                                                     </div>
                                                 </div>
+
+                                                {/* Report Summary Cards */}
+                                                {reportsPreviewData.rows && reportsPreviewData.rows.length > 0 && reportsReportType !== 'employee_master' && (
+                                                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 p-5 border-b border-slate-200 dark:border-github-dark-border bg-slate-50/50 dark:bg-github-dark-subtle/5">
+                                                        <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border p-3.5 rounded-xl shadow-sm flex items-center justify-between">
+                                                            <div>
+                                                                <span className="text-[10px] font-bold text-slate-450 dark:text-github-dark-muted uppercase tracking-wider">Total Present</span>
+                                                                <h3 className="text-xl font-black text-emerald-600 mt-0.5">{reportsSummary.present}</h3>
+                                                            </div>
+                                                            <div className="p-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                                                                <CheckCircle size={16} />
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border p-3.5 rounded-xl shadow-sm flex items-center justify-between">
+                                                            <div>
+                                                                <span className="text-[10px] font-bold text-slate-450 dark:text-github-dark-muted uppercase tracking-wider">Total Absent</span>
+                                                                <h3 className="text-xl font-black text-rose-600 mt-0.5">{reportsSummary.absent}</h3>
+                                                            </div>
+                                                            <div className="p-2 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-lg">
+                                                                <XCircle size={16} />
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border p-3.5 rounded-xl shadow-sm flex items-center justify-between">
+                                                            <div>
+                                                                <span className="text-[10px] font-bold text-slate-455 dark:text-github-dark-muted uppercase tracking-wider">Total Leave</span>
+                                                                <h3 className="text-xl font-black text-sky-600 mt-0.5">{reportsSummary.leave}</h3>
+                                                            </div>
+                                                            <div className="p-2 bg-sky-50 dark:bg-sky-950/20 text-sky-600 dark:text-sky-400 rounded-lg">
+                                                                <CalendarIcon size={16} />
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border p-3.5 rounded-xl shadow-sm flex items-center justify-between">
+                                                            <div>
+                                                                <span className="text-[10px] font-bold text-slate-455 dark:text-github-dark-muted uppercase tracking-wider">Total Half Day</span>
+                                                                <h3 className="text-xl font-black text-indigo-600 mt-0.5">{reportsSummary.halfDay}</h3>
+                                                            </div>
+                                                            <div className="p-2 bg-indigo-50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                                                                <Clock size={16} />
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-white dark:bg-dark-card border border-slate-200 dark:border-github-dark-border p-3.5 rounded-xl shadow-sm flex items-center justify-between">
+                                                            <div>
+                                                                <span className="text-[10px] font-bold text-slate-455 dark:text-github-dark-muted uppercase tracking-wider">Total Overtime</span>
+                                                                <h3 className="text-xl font-black text-purple-600 mt-0.5">{reportsSummary.overtime.toFixed(1)}h</h3>
+                                                            </div>
+                                                            <div className="p-2 bg-purple-50 dark:bg-purple-950/20 text-purple-600 dark:text-purple-400 rounded-lg">
+                                                                <TrendingUp size={16} />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 <div className="overflow-x-auto bg-slate-100 dark:bg-[#161b22]/50 p-4 border-t border-slate-200 dark:border-[#30363d] no-scrollbar">
                                                     {reportsLoadingPreview ? (
                                                         <div className="flex flex-col items-center justify-center py-20 gap-4">
